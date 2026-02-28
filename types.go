@@ -1,6 +1,10 @@
 package enriche
 
-import "time"
+import (
+	"time"
+
+	"github.com/anatolykoptev/go-enriche/extract"
+)
 
 // Mode specifies the enrichment mode.
 type Mode int
@@ -35,17 +39,8 @@ type Result struct {
 	Metadata      *ContentMeta // title/author/language
 }
 
-// Facts holds structured data extracted from a page.
-type Facts struct {
-	PlaceName *string
-	PlaceType *string
-	Address   *string
-	Phone     *string
-	Price     *string
-	Website   *string
-	Hours     *string
-	EventDate *string
-}
+// Facts is re-exported from extract package.
+type Facts = extract.Facts
 
 // ContentMeta holds article metadata extracted by trafilatura.
 type ContentMeta struct {
