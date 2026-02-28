@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/anatolykoptev/go-enriche/extract"
+	"github.com/anatolykoptev/go-enriche/fetch"
 )
 
 // Mode specifies the enrichment mode.
@@ -29,7 +30,7 @@ type Item struct {
 type Result struct {
 	Name          string
 	URL           string
-	Status        string       // "active", "not_found", "redirect", "unreachable", "website_down"
+	Status        fetch.PageStatus // page availability status
 	Content       string       // extracted article text
 	Image         *string      // og:image URL
 	PublishedAt   *time.Time   // extracted publication date
