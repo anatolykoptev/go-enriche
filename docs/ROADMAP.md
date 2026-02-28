@@ -8,38 +8,36 @@ Extracted from go-wp's monolithic `tool_enrich.go`. Three consumers: go-wp, go-c
 
 ---
 
-## Phase 0: Infrastructure
+## Phase 0: Infrastructure ✅
 
 **Goal**: Project scaffolding — builds, lints, CI passes on empty packages.
 
-- [ ] `go.mod` with all dependencies
-- [ ] `Makefile` (lint, test, build)
-- [ ] `.golangci.yml` (v2, from go-imagefy)
-- [ ] `.pre-commit-config.yaml`
-- [ ] `.github/workflows/ci.yml` (Go 1.24+1.25, golangci-lint)
-- [ ] `.gitignore`, `LICENSE.md`
-- [ ] Empty package stubs: enriche.go, types.go, options.go
-- [ ] Empty sub-packages: fetch/, extract/, structured/, search/, cache/
-- [ ] README.md (short, API examples)
+- [x] `go.mod` with all dependencies
+- [x] `Makefile` (lint, test, build)
+- [x] `.golangci.yml` (v2, from go-imagefy)
+- [x] `.pre-commit-config.yaml`
+- [x] `.github/workflows/ci.yml` (Go 1.24+1.25, golangci-lint)
+- [x] `.gitignore`, `LICENSE.md`
+- [x] Empty package stubs: enriche.go, types.go
+- [x] Empty sub-packages: fetch/, extract/, structured/, search/, cache/
+- [x] README.md (short, API examples)
 
-**Success**: `make lint && make test` pass. CI green.
+**Success**: `make lint && make test` pass. CI green. ✅
 
-## Phase 1: Extract
+## Phase 1: Extract ✅
 
 **Goal**: Extract article text, structured facts, og:image, dates from HTML.
 
-- [ ] `extract/text.go` — go-trafilatura wrapper, `ExtractText(io.Reader, *url.URL) (*TextResult, error)`
-- [ ] `structured/parser.go` — astappiev/microdata wrapper, `Parse(html, contentType, pageURL) (*Data, error)`
-- [ ] `structured/place.go` — `Place` struct + `FirstPlace()` converter
-- [ ] `structured/article.go` — `Article` struct + `FirstArticle()` converter
-- [ ] `structured/event.go` — `Event` struct + `FirstEvent()` converter
-- [ ] `structured/org.go` — `Organization` struct + `FirstOrganization()` converter
-- [ ] `extract/facts.go` — cascade: structured → regex fallback, pre-compiled patterns
-- [ ] `extract/ogimage.go` — go-imagefy `ExtractOGImageURL` wrapper
-- [ ] `extract/date.go` — go-htmldate wrapper via trafilatura metadata
-- [ ] Tests: HTML fixtures in testdata/, table-driven tests per function
+- [x] `extract/text.go` — go-trafilatura wrapper, `ExtractText(io.Reader, *url.URL) (*TextResult, error)`
+- [x] `structured/parser.go` — astappiev/microdata wrapper, `Parse(io.Reader, contentType, pageURL) (*Data, error)`
+- [x] `structured/types.go` — `Place`, `Article`, `Event`, `Organization` structs + converters
+- [x] `extract/facts.go` — cascade: structured → regex fallback, pre-compiled patterns
+- [x] `extract/ogimage.go` — go-imagefy `ExtractOGImageURL` wrapper
+- [x] `extract/date.go` — go-htmldate via trafilatura metadata
+- [x] `extract/regex.go` — pre-compiled patterns for address/phone/price (Russian + English)
+- [x] 27 tests (6 structured + 21 extract), lint clean
 
-**Success**: Given real HTML (fontanka.ru, yandex maps, schema.org page), extracts text + facts + image + date accurately.
+**Success**: Extracts text + facts + image + date from JSON-LD, Microdata, and regex fallback. ✅
 
 ## Phase 2: Fetch
 
