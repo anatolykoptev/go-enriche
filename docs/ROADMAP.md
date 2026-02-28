@@ -39,18 +39,18 @@ Extracted from go-wp's monolithic `tool_enrich.go`. Three consumers: go-wp, go-c
 
 **Success**: Extracts text + facts + image + date from JSON-LD, Microdata, and regex fallback. ✅
 
-## Phase 2: Fetch
+## Phase 2: Fetch ✅
 
 **Goal**: HTTP fetch with status detection, stealth, singleflight dedup.
 
-- [ ] `fetch/status.go` — PageStatus enum (Active/NotFound/Redirect/Unreachable/WebsiteDown)
-- [ ] `fetch/fetcher.go` — `Fetcher{}`, `Fetch(ctx, url) (*FetchResult, error)`, singleflight
-- [ ] `fetch/stealth.go` — go-stealth integration, optional TLS fingerprinting
-- [ ] Custom `CheckRedirect` for domain-change detection
-- [ ] Max body bytes (2MB), timeout (15s)
-- [ ] Tests: httptest.Server — redirects, 404, timeouts, domain changes
+- [x] `fetch/status.go` — PageStatus enum (Active/NotFound/Redirect/Unreachable/WebsiteDown)
+- [x] `fetch/fetcher.go` — `Fetcher{}`, `Fetch(ctx, url) (*FetchResult, error)`, singleflight
+- [x] `fetch/stealth.go` — go-stealth integration, optional TLS fingerprinting
+- [x] Custom `CheckRedirect` for domain-change detection
+- [x] Max body bytes (2MB), timeout (15s)
+- [x] Tests: httptest.Server — redirects, 404, timeouts, domain changes, singleflight
 
-**Success**: Fetches real pages with correct status detection. Singleflight deduplicates parallel requests.
+**Success**: Fetches real pages with correct status detection. Singleflight deduplicates parallel requests. ✅
 
 ## Phase 3: Search + Cache
 
