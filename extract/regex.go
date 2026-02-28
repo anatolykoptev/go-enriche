@@ -33,11 +33,15 @@ func regexSubmatch(re *regexp.Regexp, text string) *string {
 	if m == nil {
 		return nil
 	}
+	var s string
 	if len(m) >= 2 && m[1] != "" {
-		s := strings.TrimSpace(m[1])
-		return &s
+		s = strings.TrimSpace(m[1])
+	} else {
+		s = strings.TrimSpace(m[0])
 	}
-	s := strings.TrimSpace(m[0])
+	if s == "" {
+		return nil
+	}
 	return &s
 }
 
@@ -48,5 +52,8 @@ func regexMatch(re *regexp.Regexp, text string) *string {
 		return nil
 	}
 	s := strings.TrimSpace(m)
+	if s == "" {
+		return nil
+	}
 	return &s
 }

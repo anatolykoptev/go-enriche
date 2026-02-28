@@ -1,6 +1,9 @@
 package extract
 
-import "testing"
+import (
+	"regexp"
+	"testing"
+)
 
 func TestRegexAddress_Russian(t *testing.T) {
 	t.Parallel()
@@ -90,5 +93,27 @@ func TestRegexPrice_NotFound(t *testing.T) {
 	price := regexPrice(text)
 	if price != nil {
 		t.Errorf("expected nil, got %v", *price)
+	}
+}
+
+func TestRegexSubmatch_WhitespaceOnly(t *testing.T) {
+	t.Parallel()
+	// Regression: regexSubmatch must return nil (not &"") when capture
+	// group matches whitespace that trims to empty string.
+	re := regexp.MustCompile(`test[:\s]+([^\n]{5,20})`)
+	result := regexSubmatch(re, "test:      \n")
+	if result != nil {
+		t.Errorf("expected nil for whitespace-only capture, got %q", *result)
+	}
+}
+
+func TestRegexMatch_WhitespaceOnly(t *testing.T) {
+	t.Parallel()
+	// Regression: regexMatch must return nil (not &"") when full match
+	// trims to empty string.
+	re := regexp.MustCompile(`\s{3,}`)
+	result := regexMatch(re, "hello     world")
+	if result != nil {
+		t.Errorf("expected nil for whitespace-only match, got %q", *result)
 	}
 }
