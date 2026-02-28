@@ -40,7 +40,6 @@ require (
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rs/zerolog v1.33.0 // indirect
-	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/tam7t/hpkp v0.0.0-20160821193359-2b70b4024ed5 // indirect
 	github.com/tetratelabs/wazero v1.8.1 // indirect
 	github.com/wasilibs/go-re2 v1.7.0 // indirect
