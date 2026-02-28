@@ -45,8 +45,11 @@ func TestExtractText_EmptyHTML(t *testing.T) {
 	t.Parallel()
 	pageURL, _ := url.Parse("https://example.com")
 	result, err := ExtractText(strings.NewReader(""), pageURL)
-	if err == nil && result != nil && result.Content != "" {
-		t.Error("expected empty content for empty HTML")
+	if err != nil {
+		return // error is acceptable for empty input
+	}
+	if result != nil && result.Content != "" {
+		t.Errorf("expected nil result or empty content for empty HTML, got content: %q", result.Content)
 	}
 }
 

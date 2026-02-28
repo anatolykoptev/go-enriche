@@ -73,9 +73,7 @@ func applyEventFacts(data *structured.Data, facts *Facts) {
 	setIfNil(&facts.PlaceName, event.Name)
 	setIfNil(&facts.EventDate, event.StartDate)
 	setIfNil(&facts.Price, event.Price)
-	if event.Location != nil {
-		setIfNil(&facts.Address, event.Location)
-	}
+	setIfNil(&facts.Address, event.Location)
 }
 
 func applyOrgFacts(data *structured.Data, facts *Facts) {
