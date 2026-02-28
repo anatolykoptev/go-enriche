@@ -30,6 +30,8 @@ type Fetcher struct {
 type Option func(*Fetcher)
 
 // WithClient sets a custom HTTP client (e.g., stealth-configured).
+// When using WithClient, set the timeout on the provided client directly
+// rather than via WithTimeout, as option order affects which client is mutated.
 func WithClient(c *http.Client) Option {
 	return func(f *Fetcher) { f.client = c }
 }
@@ -60,6 +62,8 @@ func NewFetcher(opts ...Option) *Fetcher {
 
 // Fetch retrieves a page and classifies its status.
 // Concurrent calls for the same URL are deduplicated via singleflight.
+// Note: the winning goroutine's context governs the in-flight request;
+// if that context is canceled, all waiters receive StatusUnreachable.
 func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (*FetchResult, error) {
 	if rawURL == "" {
 		return nil, errors.New("fetch: empty URL")
