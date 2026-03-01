@@ -6,8 +6,8 @@ github.com/alicebob/miniredis/v2 v2.37.0 h1:RheObYW32G1aiJIj81XVt78ZHJpHonHLHW7O
 github.com/alicebob/miniredis/v2 v2.37.0/go.mod h1:TcL7YfarKPGDAthEtl5NBeHZfeUQj6OXMm/+iu5cLMM=
 github.com/anatolykoptev/go-imagefy v0.1.1 h1:003FpJy8SXeTJNCfnvYuA+QOacP8bsxn2h5gTKquJE0=
 github.com/anatolykoptev/go-imagefy v0.1.1/go.mod h1:s+V/fuhF+bpbsGXLeYdWEtQR/rijhSqeFxXAQHWIo+M=
-github.com/anatolykoptev/go-stealth v1.0.0 h1:uL2OdHSPZwKT7JBbKqvSpv24eaufoO8b5qajVP4lfD4=
-github.com/anatolykoptev/go-stealth v1.0.0/go.mod h1:Qnr6G2O57rcyF6rHtcSjnju/4BcG7+7mdlGjOxtQVSs=
+github.com/anatolykoptev/go-stealth v1.1.0 h1:m487PdPbWmqCQdpX6VEtNjI8+QEUqNukEWeroWgjOYA=
+github.com/anatolykoptev/go-stealth v1.1.0/go.mod h1:Qnr6G2O57rcyF6rHtcSjnju/4BcG7+7mdlGjOxtQVSs=
 github.com/andybalholm/brotli v1.2.0 h1:ukwgCxwYrmACq68yiUqwIWnGY0cTPox/M94sVwToPjQ=
 github.com/andybalholm/brotli v1.2.0/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/andybalholm/cascadia v1.3.3 h1:AG2YHrzJIm4BZ19iwJ/DAua6Btl3IwJX+VI4kktS1LM=
