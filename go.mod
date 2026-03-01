@@ -13,9 +13,10 @@ require (
 )
 
 require (
+	github.com/PuerkitoBio/goquery v1.11.0 // indirect
 	github.com/RadhiFadlillah/whatlanggo v0.0.0-20240916001553-aac1f0f737fc // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
-	github.com/andybalholm/cascadia v1.3.2 // indirect
+	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de // indirect
 	github.com/astappiev/fixjson v1.0.1 // indirect
 	github.com/bdandy/go-errors v1.2.2 // indirect
