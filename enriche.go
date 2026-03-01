@@ -5,9 +5,6 @@ package enriche
 import (
 	"context"
 	"log/slog"
-	"math/rand/v2"
-	"net/url"
-	"strings"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -15,6 +12,7 @@ import (
 	"github.com/anatolykoptev/go-enriche/cache"
 	"github.com/anatolykoptev/go-enriche/extract"
 	"github.com/anatolykoptev/go-enriche/fetch"
+	"github.com/anatolykoptev/go-enriche/maps"
 	"github.com/anatolykoptev/go-enriche/search"
 )
 
@@ -28,6 +26,7 @@ type Enricher struct {
 	fetcher       *fetch.Fetcher
 	cache         cache.Cache
 	search        search.Provider
+	mapsChecker   maps.Checker
 	concurrency   int
 	cacheTTL      time.Duration
 	maxContentLen int
@@ -77,6 +76,17 @@ func (e *Enricher) Enrich(ctx context.Context, item Item) (*Result, error) {
 		e.metrics.cacheMiss()
 	}
 
+	// Maps status check (places only) — short-circuit if permanently closed.
+	if e.checkMapsStatus(ctx, item, result) {
+		if e.search != nil {
+			e.doSearch(ctx, item, result)
+		}
+		if e.cache != nil {
+			e.cache.Set(ctx, cacheKey(item), result, e.cacheTTL)
+		}
+		return result, nil
+	}
+
 	// Fetch + extract.
 	if item.URL != "" {
 		e.fetchAndExtract(ctx, item, result)
@@ -116,99 +126,25 @@ func (e *Enricher) EnrichBatch(ctx context.Context, items []Item) []*Result {
 	return results
 }
 
-func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Result) {
-	fr := e.fetchWithRetry(ctx, item.URL)
-	if fr == nil {
-		result.Status = fetch.StatusUnreachable
-		return
+// checkMapsStatus queries the maps checker for place closure status.
+// Only runs for ModePlaces. Returns true if the place is permanently closed.
+func (e *Enricher) checkMapsStatus(ctx context.Context, item Item, result *Result) bool {
+	if e.mapsChecker == nil || item.Mode != ModePlaces {
+		return false
 	}
-
-	result.Status = fr.Status
-	if fr.FinalURL != "" {
-		result.URL = fr.FinalURL
-	}
-
-	if fr.Status != fetch.StatusActive {
-		e.logger.DebugContext(ctx, "enriche: fetch non-active", "url", item.URL, "status", fr.Status, "code", fr.StatusCode)
-		if fr.Status == fetch.StatusUnreachable {
-			e.metrics.fetchError()
-		}
-		return
-	}
-
-	e.logger.DebugContext(ctx, "enriche: fetched", "url", item.URL, "status", fr.Status, "code", fr.StatusCode)
-
-	// Extract text + metadata.
-	pageURL, _ := url.Parse(item.URL)
-	textResult, textErr := extract.ExtractText(strings.NewReader(fr.HTML), pageURL)
-	if textErr == nil && textResult != nil {
-		result.Content = textResult.Content
-		if e.maxContentLen > 0 {
-			result.Content = truncateRunes(result.Content, e.maxContentLen)
-		}
-		result.Metadata = &ContentMeta{
-			Title:       textResult.Title,
-			Author:      textResult.Author,
-			Description: textResult.Description,
-			Language:    textResult.Language,
-			SiteName:    textResult.SiteName,
-		}
-		if !textResult.Date.IsZero() {
-			t := textResult.Date
-			result.PublishedAt = &t
-		}
-		if textResult.Image != "" {
-			result.Image = &textResult.Image
-		}
-	}
-
-	// Extract structured facts.
-	result.Facts = extract.ExtractFacts(fr.HTML, item.URL)
-
-	// OG image fallback.
-	if result.Image == nil {
-		result.Image = extract.ExtractOGImage(fr.HTML)
-	}
-
-	// Date fallback.
-	if result.PublishedAt == nil {
-		result.PublishedAt = extract.ExtractDate(strings.NewReader(fr.HTML), pageURL)
-	}
-}
-
-// fetchWithRetry fetches a URL with one retry on transient errors.
-// Returns nil if all attempts fail.
-func (e *Enricher) fetchWithRetry(ctx context.Context, rawURL string) *fetch.FetchResult {
-	fr, err := e.fetcher.Fetch(ctx, rawURL)
+	cr, err := e.mapsChecker.Check(ctx, item.Name, item.City)
 	if err != nil {
-		e.logger.DebugContext(ctx, "enriche: fetch failed", "url", rawURL, "err", err)
-		e.metrics.fetchError()
-		return nil
+		e.logger.DebugContext(ctx, "enriche: maps check failed", "name", item.Name, "err", err)
+		e.metrics.mapsCheckError()
+		return false
 	}
-
-	if !fr.IsTransient() {
-		return fr
+	if cr.IsClosed() {
+		result.Status = fetch.StatusClosed
+		e.logger.InfoContext(ctx, "enriche: place permanently closed on maps",
+			"name", item.Name, "map_url", cr.MapURL)
+		return true
 	}
-
-	// One retry for transient errors (502, 503, 504, 429, connection failure).
-	e.logger.DebugContext(ctx, "enriche: transient error, retrying", "url", rawURL, "code", fr.StatusCode)
-	jitter := time.Duration(100+rand.IntN(200)) * time.Millisecond //nolint:mnd,gosec
-	timer := time.NewTimer(jitter)
-	select {
-	case <-ctx.Done():
-		timer.Stop()
-		e.metrics.fetchError()
-		return nil
-	case <-timer.C:
-	}
-
-	fr, err = e.fetcher.Fetch(ctx, rawURL)
-	if err != nil {
-		e.logger.DebugContext(ctx, "enriche: retry failed", "url", rawURL, "err", err)
-		e.metrics.fetchError()
-		return nil
-	}
-	return fr
+	return false
 }
 
 func (e *Enricher) doSearch(ctx context.Context, item Item, result *Result) {
