@@ -52,20 +52,21 @@ Extracted from go-wp's monolithic `tool_enrich.go`. Three consumers: go-wp, go-c
 
 **Success**: Fetches real pages with correct status detection. Singleflight deduplicates parallel requests. ✅
 
-## Phase 3: Search + Cache
+## Phase 3: Search + Cache ✅
 
 **Goal**: SearXNG context search and multi-layer caching.
 
-- [ ] `search/provider.go` — `Provider` interface
-- [ ] `search/searxng.go` — SearXNG implementation, result aggregation, top N sources
-- [ ] `search/query.go` — mode-aware query building (news/places/events)
-- [ ] `cache/cache.go` — `Cache` interface
-- [ ] `cache/memory.go` — sync.Map L1
-- [ ] `cache/redis.go` — go-redis L2 with TTL
-- [ ] `cache/tiered.go` — L1 → L2 cascade
-- [ ] Tests: httptest for SearXNG, miniredis for Redis, unit for Memory/Tiered
+- [x] `search/provider.go` — `Provider` interface, `SearchResult` type
+- [x] `search/searxng.go` — SearXNG implementation, result aggregation, top N sources, URL dedup
+- [x] `search/query.go` — mode-aware query building (news/places/events)
+- [x] `cache/cache.go` — `Cache` interface
+- [x] `cache/memory.go` — sync.Map L1 with TTL expiry
+- [x] `cache/redis.go` — go-redis L2 with TTL
+- [x] `cache/tiered.go` — L1 → L2 cascade with promotion
+- [x] Tests: httptest for SearXNG, miniredis for Redis, unit for Memory/Tiered
+- [x] 27 tests (12 search + 15 cache), lint clean
 
-**Success**: SearXNG returns context + sources. Cache hit avoids re-fetch. Tiered cache works L1 → L2.
+**Success**: SearXNG returns context + sources. Cache hit avoids re-fetch. Tiered cache works L1 → L2. ✅
 
 ## Phase 4: Orchestration
 
