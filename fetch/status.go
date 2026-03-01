@@ -11,6 +11,7 @@ const (
 	StatusRedirect    PageStatus = "redirect"
 	StatusUnreachable PageStatus = "unreachable"
 	StatusWebsiteDown PageStatus = "website_down"
+	StatusClosed      PageStatus = "closed"
 )
 
 // FetchResult is the output of a page fetch.

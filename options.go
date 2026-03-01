@@ -7,6 +7,7 @@ import (
 
 	"github.com/anatolykoptev/go-enriche/cache"
 	"github.com/anatolykoptev/go-enriche/fetch"
+	"github.com/anatolykoptev/go-enriche/maps"
 	"github.com/anatolykoptev/go-enriche/search"
 )
 
@@ -68,4 +69,11 @@ func WithLogger(l *slog.Logger) Option {
 // WithMetrics sets callback hooks for counters (cache hit/miss, errors).
 func WithMetrics(m *Metrics) Option {
 	return func(e *Enricher) { e.metrics = m }
+}
+
+// WithMapsChecker sets a maps.Checker for place status verification.
+// Only effective for ModePlaces items. If the checker reports a place
+// as permanently closed, enrichment short-circuits with StatusClosed.
+func WithMapsChecker(c maps.Checker) Option {
+	return func(e *Enricher) { e.mapsChecker = c }
 }

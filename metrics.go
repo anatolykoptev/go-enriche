@@ -3,10 +3,11 @@ package enriche
 // Metrics provides callback hooks for observability.
 // Any nil field is safely ignored (no-op).
 type Metrics struct {
-	OnCacheHit    func()
-	OnCacheMiss   func()
-	OnFetchError  func()
-	OnSearchError func()
+	OnCacheHit       func()
+	OnCacheMiss      func()
+	OnFetchError     func()
+	OnSearchError    func()
+	OnMapsCheckError func()
 }
 
 func (m *Metrics) cacheHit() {
@@ -30,5 +31,11 @@ func (m *Metrics) fetchError() {
 func (m *Metrics) searchError() {
 	if m != nil && m.OnSearchError != nil {
 		m.OnSearchError()
+	}
+}
+
+func (m *Metrics) mapsCheckError() {
+	if m != nil && m.OnMapsCheckError != nil {
+		m.OnMapsCheckError()
 	}
 }

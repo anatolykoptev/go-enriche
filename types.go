@@ -53,6 +53,7 @@ const (
 	StatusRedirect    = fetch.StatusRedirect
 	StatusUnreachable = fetch.StatusUnreachable
 	StatusWebsiteDown = fetch.StatusWebsiteDown
+	StatusClosed      = fetch.StatusClosed
 )
 
 // ContentMeta holds article metadata extracted by trafilatura.
