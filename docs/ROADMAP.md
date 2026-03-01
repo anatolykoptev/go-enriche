@@ -97,10 +97,36 @@ Extracted from go-wp's monolithic `tool_enrich.go`. Three consumers: go-wp, go-c
 
 ---
 
+## Phase 6: Hardening
+
+**Goal**: Fix regression from migration, add observability and robustness.
+
+- [ ] Regex facts from search context — apply `applyRegexFallback()` to `SearchContext` (lost during Phase 5 migration; old go-wp extracted address/phone/price from SearXNG snippets when page was unreachable)
+- [ ] `WithMaxContentLen(n)` option — truncate extracted content to N runes (go-wp used 4000; currently caller's responsibility)
+- [ ] Observability: `WithLogger(slog.Logger)` option — debug logging for fetch failures, cache hit/miss, search errors
+- [ ] Observability: `WithMetrics(Metrics)` callback interface — `OnCacheHit`, `OnCacheMiss`, `OnFetchError`, `OnSearchError` counters
+- [ ] `errgroup` in `EnrichBatch` — respect context cancellation, stop early on ctx.Done()
+- [ ] Retry with backoff for transient fetch errors (timeout, 503) — 1 retry, exponential backoff
+
+**Success**: No data loss vs old go-wp. Operators can debug enrichment pipeline. Batch enrichment respects cancellation.
+
+## Phase 7: Search Providers
+
+**Goal**: Pluggable search beyond SearXNG.
+
+- [ ] Rate limiter for search providers — `WithSearchRateLimit(n, burst)` token bucket
+- [ ] Brave Search provider — `search.NewBrave(apiKey)` implementing `Provider`
+- [ ] Google Custom Search provider — `search.NewGoogle(apiKey, cx)` implementing `Provider`
+- [ ] Multi-provider fallback — try primary, fall back to secondary on error
+
+**Success**: Multiple search backends, rate-limited, with automatic fallover.
+
+---
+
 ## Future
 
 - go-content adapter (Phase 3+ of go-content roadmap)
 - vaelor integration
-- Additional SearchProviders (Brave, Google)
 - JavaScript rendering via go-rod (optional Fetcher)
 - Sitemap-based batch enrichment
+- Webhook/callback for async enrichment pipelines
