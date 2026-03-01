@@ -82,17 +82,18 @@ Extracted from go-wp's monolithic `tool_enrich.go`. Three consumers: go-wp, go-c
 
 **Success**: `enriche.New(WithStealth(c), WithCache(c), WithSearch(s)).EnrichBatch(ctx, items)` returns enriched results. ✅
 
-## Phase 5: Migration
+## Phase 5: Migration ✅
 
 **Goal**: go-wp uses go-enriche instead of its own implementation.
 
-- [ ] `go-wp/internal/enrichadapter/adapter.go` — bridges engine.Cache → cache.Cache
-- [ ] Replace `tool_enrich.go` internals with `enriche.Enrich()` calls
-- [ ] Remove: `extractArticleText`, `applyLDJSON`, `applyRegexFacts`, `fetchPageWithStatus`, `fetchSearxngContext`
-- [ ] Keep: `wp_enrich` MCP tool handler (thin wrapper)
-- [ ] Tests: verify go-wp enrichment still works via adapter
+- [x] Replace `tool_enrich.go` internals with `enriche.Enrich()` calls
+- [x] Lazy `enriche.Enricher` init with `WithStealth()` + `WithSearch()` (no adapter needed)
+- [x] Remove: `tool_enrich_extract.go` (259 lines), `tool_enrich_fetch.go` (110 lines)
+- [x] Keep: `wp_enrich` MCP tool handler (thin wrapper), research store L1, statusWebsiteDown upgrade
+- [x] Tests: 3/3 pass, 0 lint issues, full test suite green
+- [x] Net: -391 lines removed from go-wp
 
-**Success**: go-wp enrichment works identically via go-enriche. Old code deleted. Tests pass.
+**Success**: go-wp enrichment works identically via go-enriche. Old code deleted. Tests pass. ✅
 
 ---
 
