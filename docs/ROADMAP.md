@@ -111,16 +111,17 @@ Extracted from go-wp's monolithic `tool_enrich.go`. Three consumers: go-wp, go-c
 
 **Success**: No data loss vs old go-wp. Operators can debug enrichment pipeline. Batch enrichment respects cancellation. ✅
 
-## Phase 7: Search Providers
+## Phase 7: Search Providers ✅
 
 **Goal**: Pluggable search beyond SearXNG.
 
-- [ ] Rate limiter for search providers — `WithSearchRateLimit(n, burst)` token bucket
-- [ ] Brave Search provider — `search.NewBrave(apiKey)` implementing `Provider`
-- [ ] Google Custom Search provider — `search.NewGoogle(apiKey, cx)` implementing `Provider`
-- [ ] Multi-provider fallback — try primary, fall back to secondary on error
+- [x] Rate limiter for search providers — `search.NewRateLimited(provider, rps, burst)` token bucket via `golang.org/x/time/rate`
+- [x] Brave Search provider — `search.NewBrave(apiKey)` implementing `Provider`
+- [x] Google Custom Search provider — `search.NewGoogle(apiKey, cx)` implementing `Provider`
+- [x] Multi-provider fallback — `search.NewFallback(primary, fallbacks...)` try in order, `errors.Join` on all-fail
+- [x] 126 tests (19 new), lint clean
 
-**Success**: Multiple search backends, rate-limited, with automatic fallover.
+**Success**: Multiple search backends, rate-limited, with automatic fallover. ✅
 
 ---
 
