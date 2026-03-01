@@ -12,6 +12,12 @@ import (
 )
 
 // DDG implements Provider using DuckDuckGo HTML lite endpoint with browser TLS fingerprinting.
+//
+// IMPORTANT: Requires a residential/mobile proxy. Data center IPs (AWS, GCP, OCI, etc.)
+// are blocked by DuckDuckGo. Configure the proxy on the BrowserDoer:
+//
+//	bc, _ := stealth.NewClient(stealth.WithProxy("socks5://proxy:1080"))
+//	ddg := search.NewDDG(bc)
 type DDG struct {
 	bc         BrowserDoer
 	maxResults int

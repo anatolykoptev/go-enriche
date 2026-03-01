@@ -12,6 +12,12 @@ import (
 )
 
 // Startpage implements Provider using Startpage POST form with browser TLS fingerprinting.
+//
+// IMPORTANT: Requires a residential/mobile proxy. Data center IPs (AWS, GCP, OCI, etc.)
+// are blocked by Startpage (307 → CAPTCHA). Configure the proxy on the BrowserDoer:
+//
+//	bc, _ := stealth.NewClient(stealth.WithProxy("socks5://proxy:1080"))
+//	sp := search.NewStartpage(bc)
 type Startpage struct {
 	bc         BrowserDoer
 	maxResults int
