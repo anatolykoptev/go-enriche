@@ -6,6 +6,8 @@ import (
 	stealth "github.com/anatolykoptev/go-stealth"
 )
 
+const defaultStealthTimeout = 15
+
 // BrowserDoer performs HTTP requests with browser-like TLS fingerprint.
 // *stealth.BrowserClient satisfies this interface.
 type BrowserDoer interface {

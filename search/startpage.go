@@ -3,21 +3,20 @@ package search
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
+	stealth "github.com/anatolykoptev/go-stealth"
 )
 
 // Startpage implements Provider using Startpage POST form with browser TLS fingerprinting.
 //
-// IMPORTANT: Requires a residential/mobile proxy. Data center IPs (AWS, GCP, OCI, etc.)
-// are blocked by Startpage (307 → CAPTCHA). Configure the proxy on the BrowserDoer:
-//
-//	bc, _ := stealth.NewClient(stealth.WithProxy("socks5://proxy:1080"))
-//	sp := search.NewStartpage(bc)
+// Proxy is mandatory — data center IPs are blocked by Startpage (307 → CAPTCHA).
+// All requests are routed through the configured proxy; the server IP is never exposed.
 type Startpage struct {
 	bc         BrowserDoer
 	maxResults int
@@ -31,8 +30,31 @@ func WithStartpageMaxResults(n int) StartpageOption {
 	return func(sp *Startpage) { sp.maxResults = n }
 }
 
-// NewStartpage creates a Startpage Direct provider.
-func NewStartpage(bc BrowserDoer, opts ...StartpageOption) *Startpage {
+// WithStartpageDoer overrides the default BrowserDoer (for testing).
+func WithStartpageDoer(bc BrowserDoer) StartpageOption {
+	return func(sp *Startpage) { sp.bc = bc }
+}
+
+// NewStartpage creates a Startpage Direct provider with a mandatory proxy.
+// The proxyURL is used to create a stealth BrowserClient that routes all requests
+// through the proxy, ensuring the server IP is never exposed to Startpage.
+//
+// Example:
+//
+//	sp, err := search.NewStartpage("socks5://user:pass@proxy:1080")
+func NewStartpage(proxyURL string, opts ...StartpageOption) (*Startpage, error) {
+	if proxyURL == "" {
+		return nil, errors.New("startpage: proxy URL is required (data center IPs are blocked)")
+	}
+
+	bc, err := stealth.NewClient(
+		stealth.WithTimeout(defaultStealthTimeout),
+		stealth.WithProxy(proxyURL),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("startpage: stealth client: %w", err)
+	}
+
 	sp := &Startpage{
 		bc:         bc,
 		maxResults: defaultMaxResults,
@@ -40,7 +62,7 @@ func NewStartpage(bc BrowserDoer, opts ...StartpageOption) *Startpage {
 	for _, o := range opts {
 		o(sp)
 	}
-	return sp
+	return sp, nil
 }
 
 // Search queries Startpage via POST form and returns aggregated context.

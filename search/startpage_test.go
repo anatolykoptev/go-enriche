@@ -7,14 +7,12 @@ import (
 	"testing"
 )
 
-// mockStartpageBrowser implements BrowserDoer for testing.
-// Named distinctly to avoid conflicts with other test files.
-type mockStartpageBrowser struct {
-	handler func(method, url string, headers map[string]string, body io.Reader) ([]byte, map[string]string, int, error)
-}
-
-func (m *mockStartpageBrowser) Do(method, url string, headers map[string]string, body io.Reader) ([]byte, map[string]string, int, error) {
-	return m.handler(method, url, headers, body)
+// newTestStartpage creates a Startpage provider with a mock BrowserDoer for testing.
+func newTestStartpage(mock BrowserDoer, opts ...StartpageOption) *Startpage {
+	allOpts := append([]StartpageOption{WithStartpageDoer(mock)}, opts...)
+	// proxyURL is unused because WithStartpageDoer overrides the stealth client.
+	sp, _ := NewStartpage("socks5://test:1080", allOpts...) //nolint:errcheck // test helper
+	return sp
 }
 
 func TestStartpage_Search(t *testing.T) {
@@ -31,7 +29,7 @@ func TestStartpage_Search(t *testing.T) {
 		</div>
 	</body></html>`
 
-	mock := &mockStartpageBrowser{
+	mock := &mockBrowser{
 		handler: func(method, url string, headers map[string]string, body io.Reader) ([]byte, map[string]string, int, error) {
 			if method != "POST" {
 				t.Errorf("expected POST method, got %s", method)
@@ -40,7 +38,7 @@ func TestStartpage_Search(t *testing.T) {
 		},
 	}
 
-	sp := NewStartpage(mock)
+	sp := newTestStartpage(mock)
 	result, err := sp.Search(context.Background(), "test query", "")
 	if err != nil {
 		t.Fatalf("Search error: %v", err)
@@ -56,13 +54,13 @@ func TestStartpage_Search(t *testing.T) {
 func TestStartpage_ErrorStatus(t *testing.T) {
 	t.Parallel()
 
-	mock := &mockStartpageBrowser{
+	mock := &mockBrowser{
 		handler: func(method, url string, headers map[string]string, body io.Reader) ([]byte, map[string]string, int, error) {
 			return nil, nil, 403, nil
 		},
 	}
 
-	sp := NewStartpage(mock)
+	sp := newTestStartpage(mock)
 	_, err := sp.Search(context.Background(), "test query", "")
 	if err == nil {
 		t.Error("expected error on 403")
@@ -84,18 +82,28 @@ func TestStartpage_MaxResults(t *testing.T) {
 	}
 	htmlParts = append(htmlParts, []byte(`</body></html>`)...)
 
-	mock := &mockStartpageBrowser{
+	mock := &mockBrowser{
 		handler: func(method, url string, headers map[string]string, body io.Reader) ([]byte, map[string]string, int, error) {
 			return htmlParts, nil, 200, nil
 		},
 	}
 
-	sp := NewStartpage(mock, WithStartpageMaxResults(2))
+	sp := newTestStartpage(mock, WithStartpageMaxResults(2))
 	result, err := sp.Search(context.Background(), "test query", "")
 	if err != nil {
 		t.Fatalf("Search error: %v", err)
 	}
 	if len(result.Sources) > 2 {
 		t.Errorf("expected at most 2 sources, got %d", len(result.Sources))
+	}
+}
+
+func TestStartpage_RequiresProxy(t *testing.T) {
+	t.Parallel()
+
+	// Empty proxy URL should fail at stealth client creation.
+	_, err := NewStartpage("")
+	if err == nil {
+		t.Error("expected error with empty proxy URL")
 	}
 }
