@@ -135,6 +135,19 @@ Extracted from go-wp's monolithic `tool_enrich.go`. Three consumers: go-wp, go-c
 
 **Success**: DDG and Startpage as Provider implementations. Works without SearXNG or API keys. ✅
 
+## Phase 9: Proxy Fallback (Tor + ProxyPool) ✅
+
+**Goal**: Tor as free proxy fallback when Webshare (paid) returns 402, with ProxyPool rotation.
+
+- [x] `proxypool.NewStatic(urls ...string)` in go-stealth v1.1.0 — round-robin pool for static URLs
+- [x] Tor SOCKS5 Docker service (`socks5://tor:9050`) — free, always available
+- [x] `WithDDGProxyPool(pool)` + `WithStartpageProxyPool(pool)` — ProxyPoolProvider options
+- [x] `ProxyPoolProvider` interface in `search/doer.go` — compatible with stealth.ProxyPoolProvider
+- [x] go-wp wired: DDG → Startpage → SearXNG fallback chain, Webshare → Tor proxy fallback
+- [x] 134+ tests, lint clean
+
+**Success**: Direct scrapers use proxy pool with automatic Webshare → Tor fallback. Server IP never exposed. ✅
+
 ---
 
 ## Future
