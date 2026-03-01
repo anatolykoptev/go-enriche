@@ -107,3 +107,33 @@ func TestStartpage_RequiresProxy(t *testing.T) {
 		t.Error("expected error with empty proxy URL")
 	}
 }
+
+func TestStartpage_WithProxyPool(t *testing.T) {
+	t.Parallel()
+
+	html := `<html><body>
+		<div class="w-gl__result">
+			<a class="w-gl__result-title" href="https://example.com/pool">Pool Result</a>
+			<p class="w-gl__description">Pool description</p>
+		</div>
+	</body></html>`
+
+	mock := &mockBrowser{
+		handler: func(_, _ string, _ map[string]string, _ io.Reader) ([]byte, map[string]string, int, error) {
+			return []byte(html), nil, 200, nil
+		},
+	}
+
+	sp, err := NewStartpage("", WithStartpageDoer(mock), WithStartpageProxyPool(&staticPool{url: "socks5://tor:9050"}))
+	if err != nil {
+		t.Fatalf("NewStartpage with pool should succeed: %v", err)
+	}
+
+	result, err := sp.Search(context.Background(), "test", "")
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+	if len(result.Sources) != 1 {
+		t.Errorf("expected 1 source, got %d", len(result.Sources))
+	}
+}

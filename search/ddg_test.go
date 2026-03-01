@@ -164,3 +164,39 @@ func TestDDG_RequiresProxy(t *testing.T) {
 		t.Error("expected error with empty proxy URL")
 	}
 }
+
+// staticPool is a test mock implementing ProxyPoolProvider.
+type staticPool struct{ url string }
+
+func (p *staticPool) Next() string { return p.url }
+
+func TestDDG_WithProxyPool(t *testing.T) {
+	t.Parallel()
+
+	html := `<html><body>
+		<div class="result">
+			<a class="result__a" href="https://example.com/pool">Pool Result</a>
+			<span class="result__snippet">Pool snippet</span>
+		</div>
+	</body></html>`
+
+	mock := &mockBrowser{
+		handler: func(_, _ string, _ map[string]string, _ io.Reader) ([]byte, map[string]string, int, error) {
+			return []byte(html), nil, 200, nil
+		},
+	}
+
+	// ProxyPool set → proxyURL can be empty.
+	ddg, err := NewDDG("", WithDDGDoer(mock), WithDDGProxyPool(&staticPool{url: "socks5://tor:9050"}))
+	if err != nil {
+		t.Fatalf("NewDDG with pool should succeed: %v", err)
+	}
+
+	result, err := ddg.Search(context.Background(), "test", "")
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+	if len(result.Sources) != 1 {
+		t.Errorf("expected 1 source, got %d", len(result.Sources))
+	}
+}

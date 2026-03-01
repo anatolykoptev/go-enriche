@@ -19,6 +19,7 @@ import (
 // All requests are routed through the configured proxy; the server IP is never exposed.
 type Startpage struct {
 	bc         BrowserDoer
+	proxyPool  ProxyPoolProvider
 	maxResults int
 }
 
@@ -35,33 +36,48 @@ func WithStartpageDoer(bc BrowserDoer) StartpageOption {
 	return func(sp *Startpage) { sp.bc = bc }
 }
 
-// NewStartpage creates a Startpage Direct provider with a mandatory proxy.
-// The proxyURL is used to create a stealth BrowserClient that routes all requests
-// through the proxy, ensuring the server IP is never exposed to Startpage.
+// WithStartpageProxyPool enables per-request proxy rotation.
+// When set, the proxyURL argument in NewStartpage can be empty.
+func WithStartpageProxyPool(pool ProxyPoolProvider) StartpageOption {
+	return func(sp *Startpage) { sp.proxyPool = pool }
+}
+
+// NewStartpage creates a Startpage Direct provider with proxy or proxy pool.
+// Either proxyURL or WithStartpageProxyPool must be provided — data center IPs are blocked.
 //
 // Example:
 //
 //	sp, err := search.NewStartpage("socks5://user:pass@proxy:1080")
+//	sp, err := search.NewStartpage("", search.WithStartpageProxyPool(pool))
 func NewStartpage(proxyURL string, opts ...StartpageOption) (*Startpage, error) {
-	if proxyURL == "" {
-		return nil, errors.New("startpage: proxy URL is required (data center IPs are blocked)")
-	}
-
-	bc, err := stealth.NewClient(
-		stealth.WithTimeout(defaultStealthTimeout),
-		stealth.WithProxy(proxyURL),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("startpage: stealth client: %w", err)
-	}
-
-	sp := &Startpage{
-		bc:         bc,
-		maxResults: defaultMaxResults,
-	}
+	sp := &Startpage{maxResults: defaultMaxResults}
 	for _, o := range opts {
 		o(sp)
 	}
+
+	// Custom doer already set (testing).
+	if sp.bc != nil {
+		return sp, nil
+	}
+
+	// Need at least a proxy URL or a proxy pool.
+	if proxyURL == "" && sp.proxyPool == nil {
+		return nil, errors.New("startpage: proxy URL or pool is required (data center IPs are blocked)")
+	}
+
+	var stealthOpts []stealth.ClientOption
+	stealthOpts = append(stealthOpts, stealth.WithTimeout(defaultStealthTimeout))
+	if sp.proxyPool != nil {
+		stealthOpts = append(stealthOpts, stealth.WithProxyPool(sp.proxyPool))
+	} else {
+		stealthOpts = append(stealthOpts, stealth.WithProxy(proxyURL))
+	}
+
+	bc, err := stealth.NewClient(stealthOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("startpage: stealth client: %w", err)
+	}
+	sp.bc = bc
 	return sp, nil
 }
 

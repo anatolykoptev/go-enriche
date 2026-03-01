@@ -19,6 +19,7 @@ import (
 // All requests are routed through the configured proxy; the server IP is never exposed.
 type DDG struct {
 	bc         BrowserDoer
+	proxyPool  ProxyPoolProvider
 	maxResults int
 }
 
@@ -35,33 +36,48 @@ func WithDDGDoer(bc BrowserDoer) DDGOption {
 	return func(d *DDG) { d.bc = bc }
 }
 
-// NewDDG creates a DuckDuckGo Direct provider with a mandatory proxy.
-// The proxyURL is used to create a stealth BrowserClient that routes all requests
-// through the proxy, ensuring the server IP is never exposed to DuckDuckGo.
+// WithDDGProxyPool enables per-request proxy rotation.
+// When set, the proxyURL argument in NewDDG can be empty.
+func WithDDGProxyPool(pool ProxyPoolProvider) DDGOption {
+	return func(d *DDG) { d.proxyPool = pool }
+}
+
+// NewDDG creates a DuckDuckGo Direct provider with proxy or proxy pool.
+// Either proxyURL or WithDDGProxyPool must be provided — data center IPs are blocked.
 //
 // Example:
 //
 //	ddg, err := search.NewDDG("socks5://user:pass@proxy:1080")
+//	ddg, err := search.NewDDG("", search.WithDDGProxyPool(pool))
 func NewDDG(proxyURL string, opts ...DDGOption) (*DDG, error) {
-	if proxyURL == "" {
-		return nil, errors.New("ddg: proxy URL is required (data center IPs are blocked)")
-	}
-
-	bc, err := stealth.NewClient(
-		stealth.WithTimeout(defaultStealthTimeout),
-		stealth.WithProxy(proxyURL),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("ddg: stealth client: %w", err)
-	}
-
-	d := &DDG{
-		bc:         bc,
-		maxResults: defaultMaxResults,
-	}
+	d := &DDG{maxResults: defaultMaxResults}
 	for _, o := range opts {
 		o(d)
 	}
+
+	// Custom doer already set (testing).
+	if d.bc != nil {
+		return d, nil
+	}
+
+	// Need at least a proxy URL or a proxy pool.
+	if proxyURL == "" && d.proxyPool == nil {
+		return nil, errors.New("ddg: proxy URL or pool is required (data center IPs are blocked)")
+	}
+
+	var stealthOpts []stealth.ClientOption
+	stealthOpts = append(stealthOpts, stealth.WithTimeout(defaultStealthTimeout))
+	if d.proxyPool != nil {
+		stealthOpts = append(stealthOpts, stealth.WithProxyPool(d.proxyPool))
+	} else {
+		stealthOpts = append(stealthOpts, stealth.WithProxy(proxyURL))
+	}
+
+	bc, err := stealth.NewClient(stealthOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("ddg: stealth client: %w", err)
+	}
+	d.bc = bc
 	return d, nil
 }
 
