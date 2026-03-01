@@ -68,18 +68,19 @@ Extracted from go-wp's monolithic `tool_enrich.go`. Three consumers: go-wp, go-c
 
 **Success**: SearXNG returns context + sources. Cache hit avoids re-fetch. Tiered cache works L1 → L2. ✅
 
-## Phase 4: Orchestration
+## Phase 4: Orchestration ✅
 
 **Goal**: Root Enricher — the public API.
 
-- [ ] `types.go` — Item, Result, Facts, ContentMeta, Mode, PageStatus re-export
-- [ ] `options.go` — functional options (WithCache, WithStealth, WithSearch, etc.)
-- [ ] `enriche.go` — `New(opts...)`, `Enrich(ctx, Item) (*Result, error)`, `EnrichBatch(ctx, []Item) []*Result`
-- [ ] EnrichBatch: semaphore-bounded concurrency (default 5)
-- [ ] Graceful degradation: no stealth/cache/search → degrade silently
-- [ ] Tests: integration with mock Fetcher + mock Provider
+- [x] `types.go` — Item, Result, Facts, ContentMeta, Mode, PageStatus re-export
+- [x] `options.go` — functional options (WithFetcher, WithStealth, WithCache, WithCacheTTL, WithSearch, WithConcurrency)
+- [x] `enriche.go` — `New(opts...)`, `Enrich(ctx, Item) (*Result, error)`, `EnrichBatch(ctx, []Item) []*Result`
+- [x] EnrichBatch: semaphore-bounded concurrency (default 5)
+- [x] Graceful degradation: no stealth/cache/search → degrade silently
+- [x] Tests: 12 integration tests with mock Provider + httptest
+- [x] Pipeline: cache check → fetch+extract → search → cache store
 
-**Success**: `enriche.New(WithStealth(c), WithCache(c), WithSearch(s)).EnrichBatch(ctx, items)` returns enriched results.
+**Success**: `enriche.New(WithStealth(c), WithCache(c), WithSearch(s)).EnrichBatch(ctx, items)` returns enriched results. ✅
 
 ## Phase 5: Migration
 
