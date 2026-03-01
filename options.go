@@ -47,3 +47,9 @@ func WithConcurrency(n int) Option {
 		}
 	}
 }
+
+// WithMaxContentLen truncates extracted content to n runes (word-boundary preferred).
+// Default: 0 (no truncation).
+func WithMaxContentLen(n int) Option {
+	return func(e *Enricher) { e.maxContentLen = n }
+}
