@@ -12,6 +12,12 @@ var (
 	rePrice   = regexp.MustCompile(`(?i)(?:цена|стоимость|price)[:\s]+([^\n<]{2,80})`)
 )
 
+// Plain-text-safe variants (no HTML < boundary).
+var (
+	reSnippetAddress = regexp.MustCompile(`(?i)(?:адрес|address)[:\s]+([^\n]{5,100})`)
+	reSnippetPrice   = regexp.MustCompile(`(?i)(?:цена|стоимость|price)[:\s]+([^\n]{2,80})`)
+)
+
 // regexAddress extracts an address from text using regex.
 func regexAddress(text string) *string {
 	return regexSubmatch(reAddress, text)

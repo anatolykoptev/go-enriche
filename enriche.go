@@ -156,6 +156,9 @@ func (e *Enricher) doSearch(ctx context.Context, item Item, result *Result) {
 	}
 	result.SearchContext = sr.Context
 	result.SearchSources = sr.Sources
+
+	// Extract facts from search snippets (fills nil fields only).
+	extract.ExtractSnippetFacts(sr.Context, &result.Facts)
 }
 
 func cacheKey(item Item) string {
