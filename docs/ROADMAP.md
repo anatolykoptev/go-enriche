@@ -123,6 +123,18 @@ Extracted from go-wp's monolithic `tool_enrich.go`. Three consumers: go-wp, go-c
 
 **Success**: Multiple search backends, rate-limited, with automatic fallover. ✅
 
+## Phase 8: Direct Search Scrapers ✅
+
+**Goal**: Free search without SearXNG or API keys via go-stealth TLS fingerprinting.
+
+- [x] `search/doer.go` — `BrowserDoer` interface + `ChromeHeaders()` helper
+- [x] `search/ddg.go` — DDG HTML lite scraper implementing `Provider`, goquery parsing, URL unwrapping
+- [x] `search/startpage.go` — Startpage Direct scraper implementing `Provider`, goquery parsing
+- [x] Tests: 7 new (4 DDG + 3 Startpage), lint clean
+- [x] 130 total tests, race-clean
+
+**Success**: DDG and Startpage as Provider implementations. Works without SearXNG or API keys. ✅
+
 ---
 
 ## Future
