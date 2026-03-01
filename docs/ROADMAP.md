@@ -97,18 +97,19 @@ Extracted from go-wp's monolithic `tool_enrich.go`. Three consumers: go-wp, go-c
 
 ---
 
-## Phase 6: Hardening
+## Phase 6: Hardening ✅
 
 **Goal**: Fix regression from migration, add observability and robustness.
 
-- [ ] Regex facts from search context — apply `applyRegexFallback()` to `SearchContext` (lost during Phase 5 migration; old go-wp extracted address/phone/price from SearXNG snippets when page was unreachable)
-- [ ] `WithMaxContentLen(n)` option — truncate extracted content to N runes (go-wp used 4000; currently caller's responsibility)
-- [ ] Observability: `WithLogger(slog.Logger)` option — debug logging for fetch failures, cache hit/miss, search errors
-- [ ] Observability: `WithMetrics(Metrics)` callback interface — `OnCacheHit`, `OnCacheMiss`, `OnFetchError`, `OnSearchError` counters
-- [ ] `errgroup` in `EnrichBatch` — respect context cancellation, stop early on ctx.Done()
-- [ ] Retry with backoff for transient fetch errors (timeout, 503) — 1 retry, exponential backoff
+- [x] Regex facts from search context — `ExtractSnippetFacts()` with plain-text-safe patterns, integrated in `doSearch()`
+- [x] `WithMaxContentLen(n)` option — `truncateRunes()` at rune boundaries with word-boundary preference
+- [x] Observability: `WithLogger(*slog.Logger)` option — debug logging for cache hit/miss, fetch status, search results; discard handler default
+- [x] Observability: `WithMetrics(*Metrics)` callback struct — `OnCacheHit`, `OnCacheMiss`, `OnFetchError`, `OnSearchError`; nil-safe
+- [x] `errgroup` in `EnrichBatch` — `errgroup.SetLimit()` replaces WaitGroup+semaphore, context propagation
+- [x] Retry with backoff for transient fetch errors — `fetchWithRetry()`, 1 retry with 100-300ms jitter, context-aware; `FetchResult.IsTransient()` classifier
+- [x] 107 tests (23 new), lint clean
 
-**Success**: No data loss vs old go-wp. Operators can debug enrichment pipeline. Batch enrichment respects cancellation.
+**Success**: No data loss vs old go-wp. Operators can debug enrichment pipeline. Batch enrichment respects cancellation. ✅
 
 ## Phase 7: Search Providers
 
