@@ -7,8 +7,9 @@ import (
 	"log/slog"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/anatolykoptev/go-enriche/cache"
 	"github.com/anatolykoptev/go-enriche/extract"
@@ -96,23 +97,21 @@ func (e *Enricher) Enrich(ctx context.Context, item Item) (*Result, error) {
 }
 
 // EnrichBatch enriches multiple items concurrently with bounded concurrency.
+// Respects context cancellation — unstarted items are skipped.
 func (e *Enricher) EnrichBatch(ctx context.Context, items []Item) []*Result {
 	results := make([]*Result, len(items))
-	sem := make(chan struct{}, e.concurrency)
-	var wg sync.WaitGroup
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(e.concurrency)
 
 	for i, item := range items {
-		wg.Add(1)
-		go func(idx int, it Item) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			r, _ := e.Enrich(ctx, it)
-			results[idx] = r
-		}(i, item)
+		g.Go(func() error {
+			r, _ := e.Enrich(gctx, item)
+			results[i] = r
+			return nil
+		})
 	}
 
-	wg.Wait()
+	_ = g.Wait()
 	return results
 }
 

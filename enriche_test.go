@@ -251,6 +251,47 @@ func TestEnrichBatch_Concurrency(t *testing.T) {
 	}
 }
 
+func TestEnrichBatch_ContextCancel(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		// Slow handler — should be interrupted by context cancellation.
+		select {
+		case <-r.Context().Done():
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case <-time.After(2 * time.Second):
+			w.Write([]byte(testHTML)) //nolint:errcheck
+		}
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	e := New(WithConcurrency(2))
+	items := make([]Item, 4)
+	for i := range items {
+		items[i] = Item{Name: "cancel", URL: srv.URL}
+	}
+
+	start := time.Now()
+	results := e.EnrichBatch(ctx, items)
+	elapsed := time.Since(start)
+
+	// Should complete much faster than 4*2s = 8s due to context cancellation.
+	if elapsed > 2*time.Second {
+		t.Errorf("expected fast completion due to cancel, took %v", elapsed)
+	}
+
+	// All results should be non-nil (graceful degradation), but with failed status.
+	for i, r := range results {
+		if r == nil {
+			t.Errorf("result[%d] is nil", i)
+		}
+	}
+}
+
 func TestEnrich_OGImage(t *testing.T) {
 	t.Parallel()
 	html := `<html><head><meta property="og:image" content="https://img.example.com/photo.jpg"></head>
