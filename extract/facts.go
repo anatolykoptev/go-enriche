@@ -99,6 +99,23 @@ func applyRegexFallback(html string, facts *Facts) {
 	}
 }
 
+// ExtractSnippetFacts extracts address/phone/price from plain-text snippets.
+// Only fills nil fields in existing facts — never overwrites.
+func ExtractSnippetFacts(text string, facts *Facts) {
+	if text == "" || facts == nil {
+		return
+	}
+	if facts.Address == nil {
+		facts.Address = regexSubmatch(reSnippetAddress, text)
+	}
+	if facts.Phone == nil {
+		facts.Phone = regexMatch(rePhone, text)
+	}
+	if facts.Price == nil {
+		facts.Price = regexSubmatch(reSnippetPrice, text)
+	}
+}
+
 // setIfNil sets *dst to src if *dst is currently nil and src is non-nil.
 func setIfNil(dst **string, src *string) {
 	if *dst == nil && src != nil {
