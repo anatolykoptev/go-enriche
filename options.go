@@ -1,6 +1,7 @@
 package enriche
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -52,4 +53,19 @@ func WithConcurrency(n int) Option {
 // Default: 0 (no truncation).
 func WithMaxContentLen(n int) Option {
 	return func(e *Enricher) { e.maxContentLen = n }
+}
+
+// WithLogger sets a structured logger for debug-level observability.
+// If l is nil, the default no-op logger is kept.
+func WithLogger(l *slog.Logger) Option {
+	return func(e *Enricher) {
+		if l != nil {
+			e.logger = l
+		}
+	}
+}
+
+// WithMetrics sets callback hooks for counters (cache hit/miss, errors).
+func WithMetrics(m *Metrics) Option {
+	return func(e *Enricher) { e.metrics = m }
 }
