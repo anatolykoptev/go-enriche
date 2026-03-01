@@ -4,6 +4,7 @@ package enriche
 
 import (
 	"context"
+	"log/slog"
 	"net/url"
 	"strings"
 	"sync"
@@ -22,13 +23,23 @@ const (
 
 // Enricher orchestrates web content enrichment.
 type Enricher struct {
-	fetcher     *fetch.Fetcher
-	cache       cache.Cache
-	search      search.Provider
+	fetcher       *fetch.Fetcher
+	cache         cache.Cache
+	search        search.Provider
 	concurrency   int
 	cacheTTL      time.Duration
 	maxContentLen int
+	logger        *slog.Logger
+	metrics       *Metrics
 }
+
+// discardHandler silently discards all log records.
+type discardHandler struct{}
+
+func (discardHandler) Enabled(context.Context, slog.Level) bool  { return false }
+func (discardHandler) Handle(context.Context, slog.Record) error { return nil }
+func (d discardHandler) WithAttrs([]slog.Attr) slog.Handler      { return d }
+func (d discardHandler) WithGroup(string) slog.Handler            { return d }
 
 // New creates an Enricher with the given options.
 func New(opts ...Option) *Enricher {
@@ -36,6 +47,7 @@ func New(opts ...Option) *Enricher {
 		fetcher:     fetch.NewFetcher(),
 		concurrency: defaultConcurrency,
 		cacheTTL:    defaultCacheTTL,
+		logger:      slog.New(discardHandler{}),
 	}
 	for _, o := range opts {
 		o(e)
@@ -55,8 +67,12 @@ func (e *Enricher) Enrich(ctx context.Context, item Item) (*Result, error) {
 	if e.cache != nil {
 		key := cacheKey(item)
 		if e.cache.Get(ctx, key, result) {
+			e.logger.DebugContext(ctx, "enriche: cache hit", "name", item.Name, "key", key)
+			e.metrics.cacheHit()
 			return result, nil
 		}
+		e.logger.DebugContext(ctx, "enriche: cache miss", "name", item.Name, "key", key)
+		e.metrics.cacheMiss()
 	}
 
 	// Fetch + extract.
@@ -73,6 +89,8 @@ func (e *Enricher) Enrich(ctx context.Context, item Item) (*Result, error) {
 	if e.cache != nil {
 		e.cache.Set(ctx, cacheKey(item), result, e.cacheTTL)
 	}
+
+	e.logger.DebugContext(ctx, "enriche: done", "name", item.Name, "status", result.Status)
 
 	return result, nil
 }
@@ -101,6 +119,8 @@ func (e *Enricher) EnrichBatch(ctx context.Context, items []Item) []*Result {
 func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Result) {
 	fr, err := e.fetcher.Fetch(ctx, item.URL)
 	if err != nil {
+		e.logger.DebugContext(ctx, "enriche: fetch failed", "url", item.URL, "err", err)
+		e.metrics.fetchError()
 		result.Status = fetch.StatusUnreachable
 		return
 	}
@@ -111,8 +131,14 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 	}
 
 	if fr.Status != fetch.StatusActive {
+		e.logger.DebugContext(ctx, "enriche: fetch non-active", "url", item.URL, "status", fr.Status, "code", fr.StatusCode)
+		if fr.Status == fetch.StatusUnreachable {
+			e.metrics.fetchError()
+		}
 		return
 	}
+
+	e.logger.DebugContext(ctx, "enriche: fetched", "url", item.URL, "status", fr.Status, "code", fr.StatusCode)
 
 	// Extract text + metadata.
 	pageURL, _ := url.Parse(item.URL)
@@ -156,8 +182,14 @@ func (e *Enricher) doSearch(ctx context.Context, item Item, result *Result) {
 	query, timeRange := search.BuildQuery(int(item.Mode), item.Name, item.City)
 	sr, err := e.search.Search(ctx, query, timeRange)
 	if err != nil || sr == nil {
+		if err != nil {
+			e.logger.DebugContext(ctx, "enriche: search failed", "name", item.Name, "err", err)
+			e.metrics.searchError()
+		}
 		return
 	}
+
+	e.logger.DebugContext(ctx, "enriche: search done", "name", item.Name, "sources", len(sr.Sources))
 	result.SearchContext = sr.Context
 	result.SearchSources = sr.Sources
 

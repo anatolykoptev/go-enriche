@@ -1,10 +1,13 @@
 package enriche
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -330,6 +333,27 @@ func TestEnrich_MaxContentLen(t *testing.T) {
 	}
 	if result.Content != "" && len([]rune(result.Content)) > 50 {
 		t.Errorf("content should be <= 50 runes, got %d", len([]rune(result.Content)))
+	}
+}
+
+func TestEnrich_WithLogger(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	handler := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	logger := slog.New(handler)
+
+	srv := newTestServer(testHTML, http.StatusOK)
+	defer srv.Close()
+
+	e := New(WithLogger(logger))
+	_, err := e.Enrich(context.Background(), Item{Name: "Logged", URL: srv.URL})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "enriche") {
+		t.Errorf("expected log output containing 'enriche', got: %q", output)
 	}
 }
 
