@@ -292,6 +292,50 @@ func TestEnrichBatch_ContextCancel(t *testing.T) {
 	}
 }
 
+func TestEnrich_RetryTransient(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable) // 503 on first call
+			return
+		}
+		w.Write([]byte(testHTML)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	e := New()
+	result, err := e.Enrich(context.Background(), Item{Name: "Retry", URL: srv.URL})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+	if result.Status != fetch.StatusActive {
+		t.Errorf("expected StatusActive after retry, got %q", result.Status)
+	}
+	if calls.Load() != 2 {
+		t.Errorf("expected 2 fetch calls (1 fail + 1 retry), got %d", calls.Load())
+	}
+}
+
+func TestEnrich_NoRetryFor404(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	e := New()
+	result, _ := e.Enrich(context.Background(), Item{Name: "NoRetry", URL: srv.URL})
+	if result.Status != fetch.StatusNotFound {
+		t.Errorf("expected StatusNotFound, got %q", result.Status)
+	}
+	if calls.Load() != 1 {
+		t.Errorf("404 should not retry, got %d calls", calls.Load())
+	}
+}
+
 func TestEnrich_OGImage(t *testing.T) {
 	t.Parallel()
 	html := `<html><head><meta property="og:image" content="https://img.example.com/photo.jpg"></head>
