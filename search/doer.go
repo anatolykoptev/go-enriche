@@ -14,6 +14,12 @@ type BrowserDoer interface {
 	Do(method, url string, headers map[string]string, body io.Reader) ([]byte, map[string]string, int, error)
 }
 
+// ProxyPoolProvider returns the next proxy URL for rotation.
+// Compatible with stealth.ProxyPoolProvider and proxypool.ProxyPool.
+type ProxyPoolProvider interface {
+	Next() string
+}
+
 // ChromeHeaders returns browser-like HTTP headers for direct scraping.
 func ChromeHeaders() map[string]string {
 	return stealth.ChromeHeaders()
