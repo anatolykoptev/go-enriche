@@ -3,10 +3,12 @@ module github.com/anatolykoptev/go-enriche
 go 1.25.0
 
 require (
+	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/anatolykoptev/go-imagefy v0.1.1
 	github.com/anatolykoptev/go-stealth v1.0.0
 	github.com/astappiev/microdata v1.0.2
 	github.com/markusmobius/go-trafilatura v1.12.2
+	github.com/redis/go-redis/v9 v9.18.0
 	golang.org/x/sync v0.19.0
 )
 
@@ -23,6 +25,8 @@ require (
 	github.com/bogdanfinn/tls-client v1.14.0 // indirect
 	github.com/bogdanfinn/utls v1.7.7-barnius // indirect
 	github.com/bogdanfinn/websocket v1.5.5-barnius // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/elliotchance/pie/v2 v2.9.0 // indirect
 	github.com/forPelevin/gomoji v1.2.0 // indirect
 	github.com/go-shiori/dom v0.0.0-20230515143342-73569d674e1c // indirect
@@ -45,6 +49,8 @@ require (
 	github.com/wasilibs/go-re2 v1.7.0 // indirect
 	github.com/wasilibs/wazero-helpers v0.0.0-20240620070341-3dff1577cd52 // indirect
 	github.com/yosssi/gohtml v0.0.0-20201013000340-ee4748c638f4 // indirect
+	github.com/yuin/gopher-lua v1.1.1 // indirect
+	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/exp v0.0.0-20241009180824-f66d83c29e7c // indirect
 	golang.org/x/image v0.36.0 // indirect
