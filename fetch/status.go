@@ -1,5 +1,7 @@
 package fetch
 
+import "net/http"
+
 // PageStatus represents the availability status of a fetched page.
 type PageStatus string
 
@@ -17,4 +19,18 @@ type FetchResult struct {
 	Status     PageStatus
 	FinalURL   string
 	StatusCode int
+}
+
+// IsTransient returns true if the result indicates a transient error worth retrying
+// (connection failure, 502, 503, 504, 429).
+func (fr *FetchResult) IsTransient() bool {
+	if fr.Status != StatusUnreachable {
+		return false
+	}
+	// StatusCode 0 means connection failed (timeout, DNS, etc.) — transient.
+	return fr.StatusCode == 0 ||
+		fr.StatusCode == http.StatusBadGateway ||
+		fr.StatusCode == http.StatusServiceUnavailable ||
+		fr.StatusCode == http.StatusGatewayTimeout ||
+		fr.StatusCode == http.StatusTooManyRequests
 }

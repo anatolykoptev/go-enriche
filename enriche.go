@@ -5,6 +5,7 @@ package enriche
 import (
 	"context"
 	"log/slog"
+	"math/rand/v2"
 	"net/url"
 	"strings"
 	"time"
@@ -116,10 +117,8 @@ func (e *Enricher) EnrichBatch(ctx context.Context, items []Item) []*Result {
 }
 
 func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Result) {
-	fr, err := e.fetcher.Fetch(ctx, item.URL)
-	if err != nil {
-		e.logger.DebugContext(ctx, "enriche: fetch failed", "url", item.URL, "err", err)
-		e.metrics.fetchError()
+	fr := e.fetchWithRetry(ctx, item.URL)
+	if fr == nil {
 		result.Status = fetch.StatusUnreachable
 		return
 	}
@@ -175,6 +174,41 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 	if result.PublishedAt == nil {
 		result.PublishedAt = extract.ExtractDate(strings.NewReader(fr.HTML), pageURL)
 	}
+}
+
+// fetchWithRetry fetches a URL with one retry on transient errors.
+// Returns nil if all attempts fail.
+func (e *Enricher) fetchWithRetry(ctx context.Context, rawURL string) *fetch.FetchResult {
+	fr, err := e.fetcher.Fetch(ctx, rawURL)
+	if err != nil {
+		e.logger.DebugContext(ctx, "enriche: fetch failed", "url", rawURL, "err", err)
+		e.metrics.fetchError()
+		return nil
+	}
+
+	if !fr.IsTransient() {
+		return fr
+	}
+
+	// One retry for transient errors (502, 503, 504, 429, connection failure).
+	e.logger.DebugContext(ctx, "enriche: transient error, retrying", "url", rawURL, "code", fr.StatusCode)
+	jitter := time.Duration(100+rand.IntN(200)) * time.Millisecond //nolint:mnd,gosec
+	timer := time.NewTimer(jitter)
+	select {
+	case <-ctx.Done():
+		timer.Stop()
+		e.metrics.fetchError()
+		return nil
+	case <-timer.C:
+	}
+
+	fr, err = e.fetcher.Fetch(ctx, rawURL)
+	if err != nil {
+		e.logger.DebugContext(ctx, "enriche: retry failed", "url", rawURL, "err", err)
+		e.metrics.fetchError()
+		return nil
+	}
+	return fr
 }
 
 func (e *Enricher) doSearch(ctx context.Context, item Item, result *Result) {
