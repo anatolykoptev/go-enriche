@@ -16,6 +16,14 @@ func (m *mockBrowser) Do(method, url string, headers map[string]string, body io.
 	return m.handler(method, url, headers, body)
 }
 
+// newTestDDG creates a DDG provider with a mock BrowserDoer for testing.
+func newTestDDG(mock BrowserDoer, opts ...DDGOption) *DDG {
+	allOpts := append([]DDGOption{WithDDGDoer(mock)}, opts...)
+	// proxyURL is unused because WithDDGDoer overrides the stealth client.
+	d, _ := NewDDG("socks5://test:1080", allOpts...) //nolint:errcheck // test helper
+	return d
+}
+
 func TestDDG_SearchHTML(t *testing.T) {
 	t.Parallel()
 
@@ -42,7 +50,7 @@ func TestDDG_SearchHTML(t *testing.T) {
 		},
 	}
 
-	ddg := NewDDG(mock, WithDDGMaxResults(5))
+	ddg := newTestDDG(mock, WithDDGMaxResults(5))
 	result, err := ddg.Search(context.Background(), "test query", "")
 	if err != nil {
 		t.Fatalf("Search error: %v", err)
@@ -106,7 +114,7 @@ func TestDDG_ErrorStatus(t *testing.T) {
 		},
 	}
 
-	ddg := NewDDG(mock)
+	ddg := newTestDDG(mock)
 	_, err := ddg.Search(context.Background(), "test", "")
 	if err == nil {
 		t.Error("expected error on 403")
@@ -137,12 +145,22 @@ func TestDDG_MaxResults(t *testing.T) {
 		},
 	}
 
-	ddg := NewDDG(mock, WithDDGMaxResults(2))
+	ddg := newTestDDG(mock, WithDDGMaxResults(2))
 	result, err := ddg.Search(context.Background(), "test", "")
 	if err != nil {
 		t.Fatalf("Search error: %v", err)
 	}
 	if len(result.Sources) > 2 {
 		t.Errorf("expected max 2 sources, got %d", len(result.Sources))
+	}
+}
+
+func TestDDG_RequiresProxy(t *testing.T) {
+	t.Parallel()
+
+	// Empty proxy URL should fail at stealth client creation.
+	_, err := NewDDG("")
+	if err == nil {
+		t.Error("expected error with empty proxy URL")
 	}
 }

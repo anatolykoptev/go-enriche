@@ -3,21 +3,20 @@ package search
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
+	stealth "github.com/anatolykoptev/go-stealth"
 )
 
 // DDG implements Provider using DuckDuckGo HTML lite endpoint with browser TLS fingerprinting.
 //
-// IMPORTANT: Requires a residential/mobile proxy. Data center IPs (AWS, GCP, OCI, etc.)
-// are blocked by DuckDuckGo. Configure the proxy on the BrowserDoer:
-//
-//	bc, _ := stealth.NewClient(stealth.WithProxy("socks5://proxy:1080"))
-//	ddg := search.NewDDG(bc)
+// Proxy is mandatory — data center IPs are blocked by DuckDuckGo.
+// All requests are routed through the configured proxy; the server IP is never exposed.
 type DDG struct {
 	bc         BrowserDoer
 	maxResults int
@@ -31,8 +30,31 @@ func WithDDGMaxResults(n int) DDGOption {
 	return func(d *DDG) { d.maxResults = n }
 }
 
-// NewDDG creates a DuckDuckGo Direct provider.
-func NewDDG(bc BrowserDoer, opts ...DDGOption) *DDG {
+// WithDDGDoer overrides the default BrowserDoer (for testing).
+func WithDDGDoer(bc BrowserDoer) DDGOption {
+	return func(d *DDG) { d.bc = bc }
+}
+
+// NewDDG creates a DuckDuckGo Direct provider with a mandatory proxy.
+// The proxyURL is used to create a stealth BrowserClient that routes all requests
+// through the proxy, ensuring the server IP is never exposed to DuckDuckGo.
+//
+// Example:
+//
+//	ddg, err := search.NewDDG("socks5://user:pass@proxy:1080")
+func NewDDG(proxyURL string, opts ...DDGOption) (*DDG, error) {
+	if proxyURL == "" {
+		return nil, errors.New("ddg: proxy URL is required (data center IPs are blocked)")
+	}
+
+	bc, err := stealth.NewClient(
+		stealth.WithTimeout(defaultStealthTimeout),
+		stealth.WithProxy(proxyURL),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("ddg: stealth client: %w", err)
+	}
+
 	d := &DDG{
 		bc:         bc,
 		maxResults: defaultMaxResults,
@@ -40,7 +62,7 @@ func NewDDG(bc BrowserDoer, opts ...DDGOption) *DDG {
 	for _, o := range opts {
 		o(d)
 	}
-	return d
+	return d, nil
 }
 
 // Search queries DuckDuckGo HTML lite and returns aggregated context.
