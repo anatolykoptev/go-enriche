@@ -318,6 +318,21 @@ func TestEnrich_WithSearXNG(t *testing.T) {
 	}
 }
 
+func TestEnrich_MaxContentLen(t *testing.T) {
+	t.Parallel()
+	srv := newTestServer(testHTML, http.StatusOK)
+	defer srv.Close()
+
+	e := New(WithMaxContentLen(50))
+	result, err := e.Enrich(context.Background(), Item{Name: "Truncated", URL: srv.URL})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+	if result.Content != "" && len([]rune(result.Content)) > 50 {
+		t.Errorf("content should be <= 50 runes, got %d", len([]rune(result.Content)))
+	}
+}
+
 func TestCacheKey(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

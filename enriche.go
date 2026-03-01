@@ -25,8 +25,9 @@ type Enricher struct {
 	fetcher     *fetch.Fetcher
 	cache       cache.Cache
 	search      search.Provider
-	concurrency int
-	cacheTTL    time.Duration
+	concurrency   int
+	cacheTTL      time.Duration
+	maxContentLen int
 }
 
 // New creates an Enricher with the given options.
@@ -118,6 +119,9 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 	textResult, textErr := extract.ExtractText(strings.NewReader(fr.HTML), pageURL)
 	if textErr == nil && textResult != nil {
 		result.Content = textResult.Content
+		if e.maxContentLen > 0 {
+			result.Content = truncateRunes(result.Content, e.maxContentLen)
+		}
 		result.Metadata = &ContentMeta{
 			Title:       textResult.Title,
 			Author:      textResult.Author,
