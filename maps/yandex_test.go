@@ -2,117 +2,169 @@ package maps
 
 import (
 	"context"
-	"io"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
-// mockDoer implements BrowserDoer for testing.
-type mockDoer struct {
-	response []byte
-	status   int
-	err      error
+func TestYandexMaps_PermanentClosed(t *testing.T) {
+	env := newTestEnv(t, `<html>{"status":"permanent-closed","name":"Test"}</html>`)
+
+	r, err := env.checker.Check(context.Background(), "Test Place", "Москва")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Status != PlacePermanentClosed {
+		t.Errorf("got %s, want %s", r.Status, PlacePermanentClosed)
+	}
+	if !r.IsClosed() {
+		t.Error("IsClosed() should be true")
+	}
 }
 
-func (m *mockDoer) Do(_, _ string, _ map[string]string, _ io.Reader) ([]byte, map[string]string, int, error) {
-	return m.response, nil, m.status, m.err
+func TestYandexMaps_TemporaryClosed(t *testing.T) {
+	env := newTestEnv(t, `<html>{"status":"temporary-closed","name":"Test"}</html>`)
+
+	r, err := env.checker.Check(context.Background(), "Test Cafe", "СПб")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Status != PlaceTemporaryClosed {
+		t.Errorf("got %s, want %s", r.Status, PlaceTemporaryClosed)
+	}
 }
 
-func newTestChecker(html string) *YandexMaps {
-	y, _ := NewYandexMaps("", WithYandexDoer(&mockDoer{
-		response: []byte(html),
-		status:   200,
+func TestYandexMaps_Open(t *testing.T) {
+	env := newTestEnv(t, `<html>{"status":"open","name":"Good"}</html>`)
+
+	r, err := env.checker.Check(context.Background(), "Good Place", "СПб")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Status != PlaceOpen {
+		t.Errorf("got %s, want %s", r.Status, PlaceOpen)
+	}
+}
+
+func TestYandexMaps_NotFound(t *testing.T) {
+	searxng := newMockSearXNG(t, nil)
+	defer searxng.Close()
+
+	ym, _ := NewYandexMaps(searxng.URL)
+	r, err := ym.Check(context.Background(), "Nonexistent", "Нигде")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Status != PlaceNotFound {
+		t.Errorf("got %s, want %s", r.Status, PlaceNotFound)
+	}
+}
+
+func TestParseOrgStatus(t *testing.T) {
+	tests := []struct {
+		name string
+		html string
+		want string
+	}{
+		{"permanent", `"status":"permanent-closed"`, "permanent-closed"},
+		{"temporary", `"status":"temporary-closed"`, "temporary-closed"},
+		{"open", `"status":"open"`, "open"},
+		{"closed_hours", `"status":"closed"`, ""},
+		{"empty", `no status here`, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseOrgStatus([]byte(tt.html))
+			if got != tt.want {
+				t.Errorf("parseOrgStatus(%q) = %q, want %q", tt.html, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsYandexMapsOrgURL(t *testing.T) {
+	if !isYandexMapsOrgURL("https://yandex.ru/maps/org/test/123/") {
+		t.Error("should match yandex.ru")
+	}
+	if !isYandexMapsOrgURL("https://yandex.com/maps/org/test/123/") {
+		t.Error("should match yandex.com")
+	}
+	if isYandexMapsOrgURL("https://google.com/maps/place/123/") {
+		t.Error("should not match google")
+	}
+}
+
+// --- test helpers ---
+
+type testEnv struct {
+	checker *YandexMaps
+	searxng *httptest.Server
+	org     *httptest.Server
+}
+
+// newTestEnv creates a mock SearXNG that returns a fake yandex.ru/maps/org URL,
+// and a mock org page server. A custom HTTP client redirects yandex.ru requests
+// to the local org server.
+func newTestEnv(t *testing.T, orgHTML string) *testEnv {
+	t.Helper()
+
+	org := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(orgHTML))
 	}))
-	return y
-}
+	t.Cleanup(org.Close)
 
-func TestCheck_PermanentlyClosed(t *testing.T) {
-	html := `<html><body>
-	<li class="serp-item">
-	  <a href="https://yandex.ru/maps/org/test_cafe/12345/">Test Cafe</a>
-	  <h2>Закрыто навсегда: Test Cafe, кафе — Яндекс Карты</h2>
-	  <div class="OrganicText">Test Cafe в Санкт-Петербурге закрыто навсегда</div>
-	</li>
-	</body></html>`
+	// SearXNG returns a proper yandex.ru URL.
+	searxng := newMockSearXNG(t, []mockResult{{
+		URL:   "https://yandex.ru/maps/org/test_place/12345/",
+		Title: "Test Place",
+	}})
+	t.Cleanup(searxng.Close)
 
-	y := newTestChecker(html)
-	result, err := y.Check(context.Background(), "Test Cafe", "Санкт-Петербург")
+	// Custom transport redirects yandex.ru → local org server.
+	transport := &rewriteTransport{
+		target:    org.URL,
+		transport: http.DefaultTransport,
+	}
+	client := &http.Client{Transport: transport}
+
+	ym, err := NewYandexMaps(searxng.URL, WithYandexHTTPClient(client))
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatal(err)
 	}
-	if result.Status != PlacePermanentClosed {
-		t.Errorf("expected PlacePermanentClosed, got %q", result.Status)
-	}
-	if !result.IsClosed() {
-		t.Error("IsClosed() should return true")
-	}
+
+	return &testEnv{checker: ym, searxng: searxng, org: org}
 }
 
-func TestCheck_TemporaryClosed(t *testing.T) {
-	html := `<html><body>
-	<li class="serp-item">
-	  <a href="https://yandex.ru/maps/org/spa_center/67890/">SPA Center</a>
-	  <h2>SPA Center — Яндекс Карты</h2>
-	  <div class="OrganicText">Временно закрыто. SPA Center на ремонте</div>
-	</li>
-	</body></html>`
-
-	y := newTestChecker(html)
-	result, err := y.Check(context.Background(), "SPA Center", "Москва")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.Status != PlaceTemporaryClosed {
-		t.Errorf("expected PlaceTemporaryClosed, got %q", result.Status)
-	}
+// rewriteTransport redirects yandex.ru requests to a local test server.
+type rewriteTransport struct {
+	target    string
+	transport http.RoundTripper
 }
 
-func TestCheck_Open(t *testing.T) {
-	html := `<html><body>
-	<li class="serp-item">
-	  <a href="https://yandex.ru/maps/org/bolshoi_theatre/11111/">Bolshoi Theatre</a>
-	  <h2>Большой театр — Яндекс Карты</h2>
-	  <div class="OrganicText">Большой театр, Москва. Режим работы: 10:00-21:00</div>
-	</li>
-	</body></html>`
-
-	y := newTestChecker(html)
-	result, err := y.Check(context.Background(), "Большой театр", "Москва")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func (rt *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if strings.Contains(req.URL.Host, "yandex.ru") || strings.Contains(req.URL.Host, "yandex.com") {
+		newURL := rt.target + req.URL.Path
+		newReq, _ := http.NewRequestWithContext(req.Context(), req.Method, newURL, req.Body)
+		newReq.Header = req.Header
+		return rt.transport.RoundTrip(newReq)
 	}
-	if result.Status != PlaceOpen {
-		t.Errorf("expected PlaceOpen, got %q", result.Status)
-	}
+	return rt.transport.RoundTrip(req)
 }
 
-func TestCheck_NotFound(t *testing.T) {
-	html := `<html><body>
-	<li class="serp-item">
-	  <a href="https://example.com/something">Unrelated result</a>
-	  <div class="OrganicText">Some unrelated text</div>
-	</li>
-	</body></html>`
-
-	y := newTestChecker(html)
-	result, err := y.Check(context.Background(), "Nonexistent Place", "Москва")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.Status != PlaceNotFound {
-		t.Errorf("expected PlaceNotFound, got %q", result.Status)
-	}
+type mockResult struct {
+	URL   string `json:"url"`
+	Title string `json:"title"`
 }
 
-func TestBuildQuery(t *testing.T) {
-	q := buildQuery("Кафе Пушкин", "Москва")
-	if q != `site:yandex.ru/maps/org "Кафе Пушкин" Москва` {
-		t.Errorf("unexpected query: %s", q)
-	}
-}
-
-func TestBuildQuery_NoCity(t *testing.T) {
-	q := buildQuery("Кафе Пушкин", "")
-	if q != `site:yandex.ru/maps/org "Кафе Пушкин"` {
-		t.Errorf("unexpected query: %s", q)
-	}
+func newMockSearXNG(t *testing.T, results []mockResult) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		resp := struct {
+			Results []mockResult `json:"results"`
+		}{Results: results}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
 }
