@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/anatolykoptev/go-enriche/cache"
+	"github.com/anatolykoptev/go-enriche/extract"
 	"github.com/anatolykoptev/go-enriche/fetch"
 	"github.com/anatolykoptev/go-enriche/maps"
 	"github.com/anatolykoptev/go-enriche/search"
@@ -76,4 +77,11 @@ func WithMetrics(m *Metrics) Option {
 // as permanently closed, enrichment short-circuits with StatusClosed.
 func WithMapsChecker(c maps.Checker) Option {
 	return func(e *Enricher) { e.mapsChecker = c }
+}
+
+// WithFormat sets the output format for extracted content.
+// Default is extract.FormatText (plain text, current behavior).
+// Use extract.FormatMarkdown to preserve links, headings, and formatting.
+func WithFormat(f extract.Format) Option {
+	return func(e *Enricher) { e.format = f }
 }
