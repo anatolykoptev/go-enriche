@@ -85,3 +85,61 @@ func TestExtractText_Metadata(t *testing.T) {
 		t.Error("expected non-empty title")
 	}
 }
+
+func TestExtractText_FormatMarkdown(t *testing.T) {
+	t.Parallel()
+	rawHTML := `<html><head><title>Markdown Test</title></head>
+	<body>
+	<article>
+	<h1>Go Programming</h1>
+	<p>Learn more at <a href="https://go.dev">the Go website</a>.
+	This is a substantial article about Go programming language features.
+	It discusses many aspects including concurrency, error handling, and more.
+	The language has gained significant adoption in cloud infrastructure.</p>
+	<p>Go's standard library is comprehensive and well-documented.
+	The testing framework is built-in and encourages good practices.
+	Many companies use Go for their backend services and tooling.</p>
+	</article>
+	</body></html>`
+
+	pageURL, _ := url.Parse("https://example.com/go")
+	result, err := ExtractText(strings.NewReader(rawHTML), pageURL, WithFormat(FormatMarkdown))
+	if err != nil {
+		t.Fatalf("ExtractText error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected result, got nil")
+	}
+	if result.Content == "" {
+		t.Error("expected non-empty content")
+	}
+	// Markdown should preserve links (if ContentNode is available).
+	// At minimum, content should contain the text.
+	if !strings.Contains(result.Content, "Go") {
+		t.Errorf("content should contain 'Go', got: %s", result.Content)
+	}
+}
+
+func TestExtractText_DefaultFormat(t *testing.T) {
+	t.Parallel()
+	rawHTML := `<html><head><title>Default</title></head>
+	<body><article>
+	<p>Simple text content for testing default format behavior.
+	This needs to be substantial enough for trafilatura to extract.
+	Multiple sentences help ensure the extraction works correctly.
+	The default format should return plain text without markup.</p>
+	</article></body></html>`
+
+	pageURL, _ := url.Parse("https://example.com")
+	// No opts = default FormatText.
+	result, err := ExtractText(strings.NewReader(rawHTML), pageURL)
+	if err != nil {
+		t.Fatalf("ExtractText error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected result, got nil")
+	}
+	if result.Content == "" {
+		t.Error("expected non-empty content")
+	}
+}

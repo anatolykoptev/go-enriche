@@ -22,7 +22,13 @@ type TextResult struct {
 
 // ExtractText extracts the main article text and metadata from HTML
 // using go-trafilatura with fallback to readability and dom-distiller.
-func ExtractText(r io.Reader, pageURL *url.URL) (*TextResult, error) {
+// Optional TextOption parameters control output format.
+func ExtractText(r io.Reader, pageURL *url.URL, opts ...TextOption) (*TextResult, error) {
+	cfg := textConfig{format: FormatText}
+	for _, o := range opts {
+		o(&cfg)
+	}
+
 	result, err := trafilatura.Extract(r, trafilatura.Options{
 		OriginalURL:     pageURL,
 		EnableFallback:  true,
@@ -36,8 +42,15 @@ func ExtractText(r io.Reader, pageURL *url.URL) (*TextResult, error) {
 		return nil, nil
 	}
 
+	content := result.ContentText
+	if cfg.format == FormatMarkdown {
+		if md := renderContentNodeAsMarkdown(result); md != "" {
+			content = md
+		}
+	}
+
 	return &TextResult{
-		Content:     result.ContentText,
+		Content:     content,
 		Title:       result.Metadata.Title,
 		Author:      result.Metadata.Author,
 		Description: result.Metadata.Description,

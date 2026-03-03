@@ -27,6 +27,7 @@ type Enricher struct {
 	cache         cache.Cache
 	search        search.Provider
 	mapsChecker   maps.Checker
+	format        extract.Format
 	concurrency   int
 	cacheTTL      time.Duration
 	maxContentLen int
@@ -46,6 +47,7 @@ func (d discardHandler) WithGroup(string) slog.Handler            { return d }
 func New(opts ...Option) *Enricher {
 	e := &Enricher{
 		fetcher:     fetch.NewFetcher(),
+		format:      extract.FormatText,
 		concurrency: defaultConcurrency,
 		cacheTTL:    defaultCacheTTL,
 		logger:      slog.New(discardHandler{}),

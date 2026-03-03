@@ -35,7 +35,9 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 
 	// Extract text + metadata.
 	pageURL, _ := url.Parse(item.URL)
-	textResult, textErr := extract.ExtractText(strings.NewReader(fr.HTML), pageURL)
+	textResult, textErr := extract.ExtractText(
+		strings.NewReader(fr.HTML), pageURL, extract.WithFormat(e.format),
+	)
 	if textErr == nil && textResult != nil {
 		result.Content = textResult.Content
 		if e.maxContentLen > 0 {
@@ -57,6 +59,9 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 		}
 	}
 
+	// Goquery Tier 2 fallback for thin content.
+	e.goqueryFallback(fr.HTML, result)
+
 	// Extract structured facts.
 	result.Facts = extract.ExtractFacts(fr.HTML, item.URL)
 
@@ -69,6 +74,54 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 	if result.PublishedAt == nil {
 		result.PublishedAt = extract.ExtractDate(strings.NewReader(fr.HTML), pageURL)
 	}
+}
+
+// goqueryFallback tries goquery extraction when trafilatura output is thin
+// or when markdown format lacks links (trafilatura strips hrefs from ContentNode).
+func (e *Enricher) goqueryFallback(rawHTML string, result *Result) {
+	contentRunes := len([]rune(result.Content))
+	if !needsGoqueryFallback(e.format, result.Content, contentRunes) {
+		return
+	}
+
+	gqContent, gqTitle := extract.ExtractGoquery(rawHTML, e.format)
+	if !shouldUseGoquery(gqContent, contentRunes) {
+		return
+	}
+
+	result.Content = gqContent
+	if e.maxContentLen > 0 {
+		result.Content = truncateRunes(result.Content, e.maxContentLen)
+	}
+	if result.Metadata != nil && result.Metadata.Title == "" && gqTitle != "" {
+		result.Metadata.Title = gqTitle
+	}
+}
+
+const (
+	minExtractChars    = 200
+	maxGoqueryRatio    = 3
+	markdownLinkMarker = "]("
+)
+
+// needsGoqueryFallback checks if goquery extraction should be attempted.
+func needsGoqueryFallback(format extract.Format, content string, contentRunes int) bool {
+	if contentRunes < minExtractChars {
+		return true
+	}
+	return format == extract.FormatMarkdown &&
+		!strings.Contains(content, markdownLinkMarker)
+}
+
+// shouldUseGoquery checks if goquery result is better than current content.
+func shouldUseGoquery(gqContent string, contentRunes int) bool {
+	gqRunes := len([]rune(gqContent))
+	if contentRunes < minExtractChars {
+		return gqRunes > contentRunes
+	}
+	hasLinks := strings.Contains(gqContent, markdownLinkMarker)
+	notTooNoisy := contentRunes == 0 || gqRunes/contentRunes <= maxGoqueryRatio
+	return hasLinks && gqRunes >= contentRunes && notTooNoisy
 }
 
 // fetchWithRetry fetches a URL with one retry on transient errors.
