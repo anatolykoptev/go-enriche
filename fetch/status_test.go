@@ -29,6 +29,28 @@ func TestFetchResult_Zero(t *testing.T) {
 	}
 }
 
+func TestFetchResult_IsProxyRetryable(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		result FetchResult
+		want   bool
+	}{
+		{"403-proxy-blocked", FetchResult{Status: StatusUnreachable, StatusCode: 403}, true},
+		{"503-transient", FetchResult{Status: StatusUnreachable, StatusCode: 503}, true},
+		{"429-transient", FetchResult{Status: StatusUnreachable, StatusCode: 429}, true},
+		{"0-connection-fail", FetchResult{Status: StatusUnreachable, StatusCode: 0}, true},
+		{"404-not-retryable", FetchResult{Status: StatusNotFound, StatusCode: 404}, false},
+		{"200-active", FetchResult{Status: StatusActive, StatusCode: 200}, false},
+		{"500-not-retryable", FetchResult{Status: StatusUnreachable, StatusCode: 500}, false},
+	}
+	for _, tt := range tests {
+		if got := tt.result.IsProxyRetryable(); got != tt.want {
+			t.Errorf("%s: IsProxyRetryable() = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
 func TestFetchResult_IsTransient(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
