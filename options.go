@@ -85,6 +85,13 @@ func WithGeocoder(g *maps.Geocoder) Option {
 	return func(e *Enricher) { e.geocoder = g }
 }
 
+// WithRetryOn403 enables retrying HTTP 403 responses. Use when the underlying
+// HTTP client has proxy pool rotation, so each retry uses a different proxy.
+// Adds one extra retry attempt (total: initial + 2 retries).
+func WithRetryOn403() Option {
+	return func(e *Enricher) { e.retryOn403 = true }
+}
+
 // WithFormat sets the output format for extracted content.
 // Default is extract.FormatText (plain text, current behavior).
 // Use extract.FormatMarkdown to preserve links, headings, and formatting.

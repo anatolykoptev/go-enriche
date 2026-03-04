@@ -148,7 +148,7 @@ func (e *Enricher) geocodeIfNeeded(ctx context.Context, item Item, result *Resul
 	}
 }
 
-// fetchWithRetry fetches a URL with one retry on transient errors.
+// fetchWithRetry fetches a URL with retries on transient/proxy errors.
 // Returns nil if all attempts fail.
 func (e *Enricher) fetchWithRetry(ctx context.Context, rawURL string) *fetch.FetchResult {
 	fr, err := e.fetcher.Fetch(ctx, rawURL)
@@ -158,12 +158,38 @@ func (e *Enricher) fetchWithRetry(ctx context.Context, rawURL string) *fetch.Fet
 		return nil
 	}
 
-	if !fr.IsTransient() {
+	if !e.shouldRetryFetch(fr) {
 		return fr
 	}
 
-	// One retry for transient errors (502, 503, 504, 429, connection failure).
-	e.logger.DebugContext(ctx, "enriche: transient error, retrying", "url", rawURL, "code", fr.StatusCode)
+	// First retry.
+	fr = e.retryFetch(ctx, rawURL, fr)
+	if fr == nil {
+		return nil
+	}
+
+	// Second retry (only with retryOn403 — proxy pool rotation benefits from extra attempt).
+	if e.retryOn403 && fr.IsProxyRetryable() {
+		fr = e.retryFetch(ctx, rawURL, fr)
+		if fr == nil {
+			return nil
+		}
+	}
+
+	return fr
+}
+
+// shouldRetryFetch checks if a fetch result warrants a retry.
+func (e *Enricher) shouldRetryFetch(fr *fetch.FetchResult) bool {
+	if e.retryOn403 {
+		return fr.IsProxyRetryable()
+	}
+	return fr.IsTransient()
+}
+
+// retryFetch performs a single retry with jitter. Returns nil on context cancel or error.
+func (e *Enricher) retryFetch(ctx context.Context, rawURL string, prev *fetch.FetchResult) *fetch.FetchResult {
+	e.logger.DebugContext(ctx, "enriche: retrying fetch", "url", rawURL, "code", prev.StatusCode)
 	jitter := time.Duration(100+rand.IntN(200)) * time.Millisecond //nolint:mnd,gosec
 	timer := time.NewTimer(jitter)
 	select {
@@ -174,7 +200,7 @@ func (e *Enricher) fetchWithRetry(ctx context.Context, rawURL string) *fetch.Fet
 	case <-timer.C:
 	}
 
-	fr, err = e.fetcher.Fetch(ctx, rawURL)
+	fr, err := e.fetcher.Fetch(ctx, rawURL)
 	if err != nil {
 		e.logger.DebugContext(ctx, "enriche: retry failed", "url", rawURL, "err", err)
 		e.metrics.fetchError()
