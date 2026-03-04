@@ -34,7 +34,6 @@ type Enricher struct {
 	maxContentLen int
 	logger        *slog.Logger
 	metrics       *Metrics
-	retryOn403    bool
 }
 
 // discardHandler silently discards all log records.

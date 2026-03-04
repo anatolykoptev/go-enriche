@@ -35,12 +35,3 @@ func (fr *FetchResult) IsTransient() bool {
 		fr.StatusCode == http.StatusGatewayTimeout ||
 		fr.StatusCode == http.StatusTooManyRequests
 }
-
-// IsProxyRetryable returns true if the result warrants a retry when proxy
-// rotation is available. Includes all IsTransient() codes plus 403 (proxy blocked).
-func (fr *FetchResult) IsProxyRetryable() bool {
-	if fr.Status != StatusUnreachable {
-		return false
-	}
-	return fr.StatusCode == http.StatusForbidden || fr.IsTransient()
-}
