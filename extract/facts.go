@@ -16,6 +16,8 @@ type Facts struct {
 	Website   *string
 	Hours     *string
 	EventDate *string
+	Latitude  *float64
+	Longitude *float64
 }
 
 // ExtractFacts extracts structured facts from HTML using a cascade:
