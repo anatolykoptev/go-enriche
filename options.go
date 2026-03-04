@@ -79,6 +79,12 @@ func WithMapsChecker(c maps.Checker) Option {
 	return func(e *Enricher) { e.mapsChecker = c }
 }
 
+// WithGeocoder sets a maps.Geocoder for automatic address→coordinates resolution.
+// Only effective for ModePlaces items with a non-nil Facts.Address and nil Latitude.
+func WithGeocoder(g *maps.Geocoder) Option {
+	return func(e *Enricher) { e.geocoder = g }
+}
+
 // WithFormat sets the output format for extracted content.
 // Default is extract.FormatText (plain text, current behavior).
 // Use extract.FormatMarkdown to preserve links, headings, and formatting.

@@ -27,6 +27,7 @@ type Enricher struct {
 	cache         cache.Cache
 	search        search.Provider
 	mapsChecker   maps.Checker
+	geocoder      *maps.Geocoder
 	format        extract.Format
 	concurrency   int
 	cacheTTL      time.Duration
