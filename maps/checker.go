@@ -14,11 +14,30 @@ const (
 	PlaceUnknown         PlaceStatus = "unknown"
 )
 
+// OrgFetcher fetches a URL and returns rendered HTML (e.g. via headless browser).
+type OrgFetcher func(ctx context.Context, url string) (string, error)
+
+// OrgData holds structured business data extracted from a maps org page.
+type OrgData struct {
+	Status     PlaceStatus
+	Name       string
+	Address    string
+	Phone      string
+	Website    string
+	Hours      string
+	Rating     float64
+	Categories []string
+	Latitude   float64
+	Longitude  float64
+	MapURL     string
+}
+
 // CheckResult holds the result of a place status check.
 type CheckResult struct {
 	Status   PlaceStatus
-	MapURL   string // URL on the map service, if found
-	RawTitle string // title/snippet for debugging
+	MapURL   string   // URL on the map service, if found
+	RawTitle string   // title/snippet for debugging
+	OrgData  *OrgData // populated when OrgFetcher is available
 }
 
 // IsClosed returns true if the place is permanently closed.

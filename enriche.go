@@ -26,8 +26,8 @@ type Enricher struct {
 	fetcher       *fetch.Fetcher
 	cache         cache.Cache
 	search        search.Provider
-	mapsChecker   maps.Checker
-	geocoder      *maps.Geocoder
+	mapsChecker maps.Checker
+	geocoder    *maps.Geocoder
 	format        extract.Format
 	concurrency   int
 	cacheTTL      time.Duration
@@ -131,6 +131,7 @@ func (e *Enricher) EnrichBatch(ctx context.Context, items []Item) []*Result {
 
 // checkMapsStatus queries the maps checker for place closure status.
 // Only runs for ModePlaces. Returns true if the place is permanently closed.
+// When OrgData is available, merges business data into facts (fill-nil-only).
 func (e *Enricher) checkMapsStatus(ctx context.Context, item Item, result *Result) bool {
 	if e.mapsChecker == nil || item.Mode != ModePlaces {
 		return false
@@ -141,6 +142,14 @@ func (e *Enricher) checkMapsStatus(ctx context.Context, item Item, result *Resul
 		e.metrics.mapsCheckError()
 		return false
 	}
+
+	// Merge business data from maps (fill-nil-only).
+	if cr.OrgData != nil {
+		mergeOrgDataToFacts(cr.OrgData, &result.Facts)
+		e.logger.DebugContext(ctx, "enriche: merged maps org data",
+			"name", item.Name, "org_name", cr.OrgData.Name)
+	}
+
 	if cr.IsClosed() {
 		result.Status = fetch.StatusClosed
 		e.logger.InfoContext(ctx, "enriche: place permanently closed on maps",
@@ -148,6 +157,26 @@ func (e *Enricher) checkMapsStatus(ctx context.Context, item Item, result *Resul
 		return true
 	}
 	return false
+}
+
+// mergeOrgDataToFacts copies maps business data into facts (fill-nil-only).
+func mergeOrgDataToFacts(od *maps.OrgData, facts *Facts) {
+	setFactIfNil(&facts.PlaceName, od.Name)
+	setFactIfNil(&facts.Address, od.Address)
+	setFactIfNil(&facts.Phone, od.Phone)
+	setFactIfNil(&facts.Website, od.Website)
+	setFactIfNil(&facts.Hours, od.Hours)
+	if od.Latitude != 0 && facts.Latitude == nil {
+		facts.Latitude = &od.Latitude
+		facts.Longitude = &od.Longitude
+	}
+}
+
+// setFactIfNil sets *dst to &src if *dst is nil and src is non-empty.
+func setFactIfNil(dst **string, src string) {
+	if *dst == nil && src != "" {
+		*dst = &src
+	}
 }
 
 func (e *Enricher) doSearch(ctx context.Context, item Item, result *Result) {

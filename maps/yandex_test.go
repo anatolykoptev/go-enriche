@@ -96,6 +96,52 @@ func TestIsYandexMapsOrgURL(t *testing.T) {
 	}
 }
 
+func TestYandexMaps_WithOrgFetcher(t *testing.T) {
+	orgHTML := `<html>{"status":"open","name":"Test Cafe",
+		"address":{"formatted":"ул. Тестовая, 1"},
+		"phones":[{"formatted":"+7 999 123-45-67"}],
+		"rating":{"score":4.5},
+		"coordinates":[59.9,30.3]}</html>`
+
+	fetcher := func(_ context.Context, _ string) (string, error) {
+		return orgHTML, nil
+	}
+
+	searxng := newMockSearXNG(t, []mockResult{{
+		URL:   "https://yandex.ru/maps/org/test_cafe/999/",
+		Title: "Test Cafe",
+	}})
+	defer searxng.Close()
+
+	ym, err := NewYandexMaps(searxng.URL, WithOrgFetcher(fetcher))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := ym.Check(context.Background(), "Test Cafe", "СПб")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Status != PlaceOpen {
+		t.Errorf("status = %q, want %q", r.Status, PlaceOpen)
+	}
+	if r.OrgData == nil {
+		t.Fatal("OrgData is nil")
+	}
+	if r.OrgData.Name != "Test Cafe" {
+		t.Errorf("org name = %q", r.OrgData.Name)
+	}
+	if r.OrgData.Phone != "+7 999 123-45-67" {
+		t.Errorf("org phone = %q", r.OrgData.Phone)
+	}
+	if r.OrgData.Address != "ул. Тестовая, 1" {
+		t.Errorf("org address = %q", r.OrgData.Address)
+	}
+	if r.OrgData.Rating != 4.5 {
+		t.Errorf("org rating = %f", r.OrgData.Rating)
+	}
+}
+
 // --- test helpers ---
 
 type testEnv struct {

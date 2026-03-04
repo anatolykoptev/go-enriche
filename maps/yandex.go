@@ -21,10 +21,11 @@ const (
 //  1. Searching SearXNG for Yandex Maps org links.
 //  2. Fetching the org page and parsing the embedded JSON status.
 //
-// No API keys, proxies, or browser fingerprinting required.
+// When an OrgFetcher is set, uses it to render SPA pages and extract full business data.
 type YandexMaps struct {
 	searxngURL string
 	httpClient *http.Client
+	orgFetcher OrgFetcher
 }
 
 // YandexOption configures YandexMaps.
@@ -33,6 +34,12 @@ type YandexOption func(*YandexMaps)
 // WithYandexHTTPClient overrides the default HTTP client (for testing).
 func WithYandexHTTPClient(c *http.Client) YandexOption {
 	return func(y *YandexMaps) { y.httpClient = c }
+}
+
+// WithOrgFetcher sets a browser-based fetcher for rendering SPA org pages.
+// When set, full business data (phone, address, hours, etc.) is extracted.
+func WithOrgFetcher(f OrgFetcher) YandexOption {
+	return func(y *YandexMaps) { y.orgFetcher = f }
 }
 
 // NewYandexMaps creates a Yandex Maps checker.
@@ -74,20 +81,11 @@ func (y *YandexMaps) Check(ctx context.Context, name, city string) (*CheckResult
 		return &CheckResult{Status: PlaceNotFound}, nil
 	}
 
-	// Check each org page for status.
+	// Check each org page for status (and business data if browser available).
 	for _, orgURL := range orgURLs {
-		status, err := y.fetchOrgStatus(ctx, orgURL)
+		result, err := y.fetchAndParse(ctx, orgURL)
 		if err != nil {
 			continue
-		}
-		result := &CheckResult{MapURL: orgURL}
-		switch status {
-		case "permanent-closed":
-			result.Status = PlacePermanentClosed
-		case "temporary-closed":
-			result.Status = PlaceTemporaryClosed
-		default:
-			result.Status = PlaceOpen
 		}
 		return result, nil
 	}
@@ -139,6 +137,43 @@ func (y *YandexMaps) findOrgURLs(ctx context.Context, name, city string) ([]stri
 		}
 	}
 	return urls, nil
+}
+
+// fetchAndParse fetches an org page and returns a CheckResult with status and optional OrgData.
+func (y *YandexMaps) fetchAndParse(ctx context.Context, orgURL string) (*CheckResult, error) {
+	// Browser path: render SPA, extract full business data.
+	if y.orgFetcher != nil {
+		html, err := y.orgFetcher(ctx, orgURL)
+		if err == nil && html != "" {
+			od := parseOrgPage([]byte(html))
+			od.MapURL = orgURL
+			result := &CheckResult{
+				MapURL:  orgURL,
+				OrgData: od,
+				Status:  od.Status,
+			}
+			if result.Status == "" {
+				result.Status = PlaceUnknown
+			}
+			return result, nil
+		}
+		// Fall through to plain HTTP on browser failure.
+	}
+
+	status, err := y.fetchOrgStatus(ctx, orgURL)
+	if err != nil {
+		return nil, err
+	}
+	result := &CheckResult{MapURL: orgURL}
+	switch status {
+	case "permanent-closed":
+		result.Status = PlacePermanentClosed
+	case "temporary-closed":
+		result.Status = PlaceTemporaryClosed
+	default:
+		result.Status = PlaceOpen
+	}
+	return result, nil
 }
 
 // fetchOrgStatus fetches a Yandex Maps org page and extracts the status field.
