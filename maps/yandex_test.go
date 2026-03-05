@@ -96,6 +96,56 @@ func TestIsYandexMapsOrgURL(t *testing.T) {
 	}
 }
 
+func TestYandexMaps_SkipsClosedBranch(t *testing.T) {
+	closedOrg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`<html>{"status":"permanent-closed","name":"Q-Zar Балканская"}</html>`))
+	}))
+	t.Cleanup(closedOrg.Close)
+
+	openOrg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`<html>{"status":"open","name":"Q-Zar Авеню"}</html>`))
+	}))
+	t.Cleanup(openOrg.Close)
+
+	searxng := newMockSearXNG(t, []mockResult{
+		{URL: "https://yandex.ru/maps/org/closed_branch/111/", Title: "Closed Branch"},
+		{URL: "https://yandex.ru/maps/org/open_branch/222/", Title: "Open Branch"},
+	})
+	t.Cleanup(searxng.Close)
+
+	transport := &multiOrgTransport{
+		routes: map[string]string{
+			"/org/closed_branch/111/": closedOrg.URL,
+			"/org/open_branch/222/":   openOrg.URL,
+		},
+		transport: http.DefaultTransport,
+	}
+	ym, err := NewYandexMaps(searxng.URL, WithYandexHTTPClient(&http.Client{Transport: transport}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := ym.Check(context.Background(), "Q-Zar", "СПб")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Status != PlaceOpen {
+		t.Errorf("got %s, want %s (should skip closed branch)", r.Status, PlaceOpen)
+	}
+}
+
+func TestYandexMaps_AllBranchesClosed(t *testing.T) {
+	env := newTestEnv(t, `<html>{"status":"permanent-closed","name":"Dead Place"}</html>`)
+
+	r, err := env.checker.Check(context.Background(), "Dead Place", "СПб")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Status != PlacePermanentClosed {
+		t.Errorf("got %s, want %s", r.Status, PlacePermanentClosed)
+	}
+}
+
 func TestYandexMaps_WithOrgFetcher(t *testing.T) {
 	orgHTML := `<html>{"status":"open","name":"Test Cafe",
 		"address":{"formatted":"ул. Тестовая, 1"},
@@ -195,6 +245,25 @@ func (rt *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error)
 		newReq, _ := http.NewRequestWithContext(req.Context(), req.Method, newURL, req.Body)
 		newReq.Header = req.Header
 		return rt.transport.RoundTrip(newReq)
+	}
+	return rt.transport.RoundTrip(req)
+}
+
+// multiOrgTransport routes yandex.ru org requests to different local servers by path.
+type multiOrgTransport struct {
+	routes    map[string]string // path suffix → target base URL
+	transport http.RoundTripper
+}
+
+func (rt *multiOrgTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if strings.Contains(req.URL.Host, "yandex.ru") || strings.Contains(req.URL.Host, "yandex.com") {
+		for suffix, target := range rt.routes {
+			if strings.HasSuffix(req.URL.Path, suffix) {
+				newReq, _ := http.NewRequestWithContext(req.Context(), req.Method, target+req.URL.Path, req.Body)
+				newReq.Header = req.Header
+				return rt.transport.RoundTrip(newReq)
+			}
+		}
 	}
 	return rt.transport.RoundTrip(req)
 }

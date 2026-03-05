@@ -82,12 +82,23 @@ func (y *YandexMaps) Check(ctx context.Context, name, city string) (*CheckResult
 	}
 
 	// Check each org page for status (and business data if browser available).
+	// Prefer open/temporary-closed branches over permanently closed ones,
+	// since SearXNG may rank a closed branch higher than the active one.
+	var closedResult *CheckResult
 	for _, orgURL := range orgURLs {
 		result, err := y.fetchAndParse(ctx, orgURL)
 		if err != nil {
 			continue
 		}
-		return result, nil
+		if result.Status != PlacePermanentClosed {
+			return result, nil
+		}
+		if closedResult == nil {
+			closedResult = result
+		}
+	}
+	if closedResult != nil {
+		return closedResult, nil
 	}
 
 	return &CheckResult{Status: PlaceUnknown}, nil
