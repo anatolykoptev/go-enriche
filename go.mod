@@ -7,7 +7,7 @@ require (
 	github.com/PuerkitoBio/goquery v1.11.0
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/anatolykoptev/go-imagefy v0.1.1
-	github.com/anatolykoptev/go-stealth v1.4.1-0.20260305000000-3ad1d72
+	github.com/anatolykoptev/go-stealth v1.5.0
 	github.com/astappiev/microdata v1.0.2
 	github.com/markusmobius/go-trafilatura v1.12.2
 	github.com/redis/go-redis/v9 v9.18.0
@@ -62,5 +62,3 @@ require (
 	golang.org/x/sys v0.39.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 )
-
-replace github.com/anatolykoptev/go-stealth v1.4.1-0.20260305000000-3ad1d72 => /home/krolik/src/go-stealth
