@@ -1,7 +1,6 @@
 package search
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,13 +8,13 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/PuerkitoBio/goquery"
 	stealth "github.com/anatolykoptev/go-stealth"
+	"github.com/anatolykoptev/go-stealth/websearch"
 )
 
 // Startpage implements Provider using Startpage POST form with browser TLS fingerprinting.
 //
-// Proxy is mandatory — data center IPs are blocked by Startpage (307 → CAPTCHA).
+// Proxy is mandatory — data center IPs are blocked by Startpage (307 -> CAPTCHA).
 // All requests are routed through the configured proxy; the server IP is never exposed.
 type Startpage struct {
 	bc         BrowserDoer
@@ -107,54 +106,17 @@ func (sp *Startpage) Search(ctx context.Context, query string, timeRange string)
 		return nil, fmt.Errorf("startpage: HTTP %d", status)
 	}
 
-	results, err := parseStartpageHTML(data)
+	// Delegate HTML parsing to go-stealth websearch.
+	wsResults, err := websearch.ParseStartpageHTML(data)
 	if err != nil {
 		return nil, fmt.Errorf("startpage: parse: %w", err)
 	}
 
-	return sp.aggregate(results), nil
+	return sp.aggregate(wsResults), nil
 }
 
-func (sp *Startpage) aggregate(results []searxngResult) *SearchResult {
-	// Reuse SearXNG aggregation logic — same dedup + context building.
+func (sp *Startpage) aggregate(results []websearch.Result) *SearchResult {
+	internal := wsToInternal(results)
 	s := &SearXNG{maxResults: sp.maxResults}
-	return s.aggregate(results)
-}
-
-// parseStartpageHTML extracts search results from Startpage HTML response.
-func parseStartpageHTML(data []byte) ([]searxngResult, error) {
-	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(data))
-	if err != nil {
-		return nil, fmt.Errorf("goquery parse: %w", err)
-	}
-
-	var results []searxngResult
-
-	// Startpage result blocks: <div class="w-gl__result"> or <div class="result">
-	doc.Find(".w-gl__result, .result").Each(func(_ int, s *goquery.Selection) {
-		// Title + URL from <a> inside heading.
-		link := s.Find("a.w-gl__result-title, h3 a, a.result-link").First()
-		title := strings.TrimSpace(link.Text())
-		href, exists := link.Attr("href")
-		if !exists || title == "" {
-			return
-		}
-
-		// Description.
-		desc := s.Find("p.w-gl__description, .w-gl__description, p.result-description").First()
-		content := strings.TrimSpace(desc.Text())
-
-		// Skip empty/ad results.
-		if href == "" || strings.Contains(href, "startpage.com/do/") {
-			return
-		}
-
-		results = append(results, searxngResult{
-			URL:     href,
-			Title:   title,
-			Content: content,
-		})
-	})
-
-	return results, nil
+	return s.aggregate(internal)
 }

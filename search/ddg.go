@@ -1,7 +1,6 @@
 package search
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,8 +8,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/PuerkitoBio/goquery"
 	stealth "github.com/anatolykoptev/go-stealth"
+	"github.com/anatolykoptev/go-stealth/websearch"
 )
 
 // DDG implements Provider using DuckDuckGo HTML lite endpoint with browser TLS fingerprinting.
@@ -106,67 +105,22 @@ func (d *DDG) Search(ctx context.Context, query string, timeRange string) (*Sear
 		return nil, fmt.Errorf("ddg: HTTP %d", status)
 	}
 
-	results, err := parseDDGHTML(data)
+	// Delegate HTML parsing to go-stealth websearch.
+	wsResults, err := websearch.ParseDDGHTML(data)
 	if err != nil {
 		return nil, fmt.Errorf("ddg: parse: %w", err)
 	}
 
-	return d.aggregate(results), nil
+	return d.aggregate(wsResults), nil
 }
 
-func (d *DDG) aggregate(results []searxngResult) *SearchResult {
-	// Reuse SearXNG aggregation logic — same dedup + context building.
+func (d *DDG) aggregate(results []websearch.Result) *SearchResult {
+	internal := wsToInternal(results)
 	s := &SearXNG{maxResults: d.maxResults}
-	return s.aggregate(results)
+	return s.aggregate(internal)
 }
 
-// parseDDGHTML extracts search results from DDG HTML lite response.
-func parseDDGHTML(data []byte) ([]searxngResult, error) {
-	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(data))
-	if err != nil {
-		return nil, fmt.Errorf("goquery parse: %w", err)
-	}
-
-	var results []searxngResult
-
-	doc.Find(".result, .web-result").Each(func(_ int, s *goquery.Selection) {
-		link := s.Find("a.result__a, .result__title a, a.result-link").First()
-		title := strings.TrimSpace(link.Text())
-		href, exists := link.Attr("href")
-		if !exists || title == "" {
-			return
-		}
-
-		href = ddgUnwrapURL(href)
-		if href == "" {
-			return
-		}
-
-		snippet := s.Find(".result__snippet, .result__body").First()
-		content := strings.TrimSpace(snippet.Text())
-
-		results = append(results, searxngResult{
-			URL:     href,
-			Title:   title,
-			Content: content,
-		})
-	})
-
-	return results, nil
-}
-
-// ddgUnwrapURL extracts the actual URL from DDG redirect wrappers.
-// DDG HTML wraps links as: //duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com&rut=...
+// ddgUnwrapURL delegates to websearch.DDGUnwrapURL for backward compatibility.
 func ddgUnwrapURL(href string) string {
-	if strings.Contains(href, "duckduckgo.com/l/") || strings.Contains(href, "uddg=") {
-		if u, err := url.Parse(href); err == nil {
-			if uddg := u.Query().Get("uddg"); uddg != "" {
-				return uddg
-			}
-		}
-	}
-	if strings.HasPrefix(href, "http") {
-		return href
-	}
-	return ""
+	return websearch.DDGUnwrapURL(href)
 }
