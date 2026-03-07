@@ -127,15 +127,13 @@ func (b *Brave) Search(ctx context.Context, query string, timeRange string) (*Se
 }
 
 func (b *Brave) aggregate(results []braveResult) *SearchResult {
-	generic := make([]searxngResult, 0, len(results))
+	generic := make([]searchResult, 0, len(results))
 	for _, r := range results {
-		generic = append(generic, searxngResult{
+		generic = append(generic, searchResult{
 			URL:     r.URL,
 			Title:   r.Title,
 			Content: r.Description,
 		})
 	}
-	// Reuse SearXNG aggregation logic — same dedup + context building.
-	s := &SearXNG{maxResults: b.maxResults}
-	return s.aggregate(generic)
+	return aggregateResults(generic, b.maxResults)
 }

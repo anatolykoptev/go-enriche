@@ -20,8 +20,8 @@ func TestSearXNG_Search(t *testing.T) {
 		if r.URL.Query().Get("categories") != "general" {
 			t.Error("expected categories=general")
 		}
-		resp := searxngResponse{
-			Results: []searxngResult{
+		resp := searxngAPIResponse{
+			Results: []searxngAPIResult{
 				{URL: "https://example.com/1", Title: "Result 1", Content: "Content 1"},
 				{URL: "https://example.com/2", Title: "Result 2", Content: "Content 2"},
 				{URL: "https://example.com/3", Title: "Result 3", Content: "Content 3"},
@@ -52,7 +52,7 @@ func TestSearXNG_TimeRange(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotTimeRange = r.URL.Query().Get("time_range")
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(searxngResponse{}) //nolint:errcheck
+		json.NewEncoder(w).Encode(searxngAPIResponse{}) //nolint:errcheck
 	}))
 	defer srv.Close()
 
@@ -69,7 +69,7 @@ func TestSearXNG_EmptyTimeRange(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hasTimeRange = r.URL.Query().Has("time_range")
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(searxngResponse{}) //nolint:errcheck
+		json.NewEncoder(w).Encode(searxngAPIResponse{}) //nolint:errcheck
 	}))
 	defer srv.Close()
 
@@ -83,8 +83,8 @@ func TestSearXNG_EmptyTimeRange(t *testing.T) {
 func TestSearXNG_Dedup(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		resp := searxngResponse{
-			Results: []searxngResult{
+		resp := searxngAPIResponse{
+			Results: []searxngAPIResult{
 				{URL: "https://example.com/page", Title: "A", Content: "Content A"},
 				{URL: "https://example.com/page", Title: "B", Content: "Content B"},
 				{URL: "https://EXAMPLE.COM/page/", Title: "C", Content: "Content C"},
@@ -124,8 +124,8 @@ func TestSearXNG_ServerError(t *testing.T) {
 func TestSearXNG_CustomMaxResults(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		resp := searxngResponse{
-			Results: []searxngResult{
+		resp := searxngAPIResponse{
+			Results: []searxngAPIResult{
 				{URL: "https://a.com", Title: "A", Content: "CA"},
 				{URL: "https://b.com", Title: "B", Content: "CB"},
 				{URL: "https://c.com", Title: "C", Content: "CC"},

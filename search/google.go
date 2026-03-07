@@ -121,15 +121,13 @@ func (g *Google) Search(ctx context.Context, query string, timeRange string) (*S
 }
 
 func (g *Google) aggregate(items []googleResult) *SearchResult {
-	generic := make([]searxngResult, 0, len(items))
+	generic := make([]searchResult, 0, len(items))
 	for _, r := range items {
-		generic = append(generic, searxngResult{
+		generic = append(generic, searchResult{
 			URL:     r.Link,
 			Title:   r.Title,
 			Content: r.Snippet,
 		})
 	}
-	// Reuse SearXNG aggregation logic — same dedup + context building.
-	s := &SearXNG{maxResults: g.maxResults}
-	return s.aggregate(generic)
+	return aggregateResults(generic, g.maxResults)
 }

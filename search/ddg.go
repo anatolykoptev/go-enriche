@@ -115,9 +115,7 @@ func (d *DDG) Search(ctx context.Context, query string, timeRange string) (*Sear
 }
 
 func (d *DDG) aggregate(results []websearch.Result) *SearchResult {
-	internal := wsToInternal(results)
-	s := &SearXNG{maxResults: d.maxResults}
-	return s.aggregate(internal)
+	return aggregateResults(toSearchResults(results), d.maxResults)
 }
 
 // ddgUnwrapURL delegates to websearch.DDGUnwrapURL for backward compatibility.
