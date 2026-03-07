@@ -4,7 +4,7 @@
 
 ## Summary
 
-Standalone Go module for web content enrichment — extracted from go-wp's monolithic `tool_enrich.go`. Reusable library with sub-packages for fetch, extract, search, cache. Three consumers: go-wp, go-content, vaelor.
+Standalone Go module for web content enrichment — extracted from go-wp's monolithic `tool_enrich.go`. Reusable library with sub-packages for fetch, extract, search, cache. Three consumers: go-wp, go-nerv, vaelor.
 
 **Module**: `github.com/anatolykoptev/go-enriche`
 
@@ -12,7 +12,7 @@ Standalone Go module for web content enrichment — extracted from go-wp's monol
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Consumers | go-wp + go-content + vaelor | Generalized types needed |
+| Consumers | go-wp + go-nerv + vaelor | Generalized types needed |
 | Scope | Full pipeline + Stealth | fetch + extract + search + cache + TLS fingerprinting |
 | Structure | Sub-packages | Each usable independently |
 | Naming | go-enriche | Consistent with go-imagefy/go-stealth |
@@ -232,7 +232,7 @@ Adapter pattern (1 file ~50 lines per consumer):
 
 ```
 go-wp/internal/enrichadapter/adapter.go     — engine.Cache → cache.Cache
-go-content/internal/enrichadapter/adapter.go — store.Cache → cache.Cache
+go-nerv/internal/enrichadapter/adapter.go — store.Cache → cache.Cache
 vaelor                                       — direct enriche.New(...)
 ```
 

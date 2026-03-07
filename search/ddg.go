@@ -86,7 +86,7 @@ func (d *DDG) Search(ctx context.Context, query string, timeRange string) (*Sear
 		return nil, err
 	}
 
-	formBody := fmt.Sprintf("q=%s&df=", url.QueryEscape(query))
+	formBody := fmt.Sprintf("q=%s&df=%s", url.QueryEscape(query), ddgTimeRange(timeRange))
 
 	headers := ChromeHeaders()
 	headers["referer"] = "https://html.duckduckgo.com/"
@@ -116,6 +116,20 @@ func (d *DDG) Search(ctx context.Context, query string, timeRange string) (*Sear
 
 func (d *DDG) aggregate(results []websearch.Result) *SearchResult {
 	return aggregateResults(toSearchResults(results), d.maxResults)
+}
+
+// ddgTimeRange maps enriche time ranges to DDG date filter format.
+func ddgTimeRange(timeRange string) string {
+	switch timeRange {
+	case TimeRangeDay:
+		return "d"
+	case TimeRangeWeek:
+		return "w"
+	case TimeRangeMonth:
+		return "m"
+	default:
+		return ""
+	}
 }
 
 // ddgUnwrapURL delegates to websearch.DDGUnwrapURL for backward compatibility.

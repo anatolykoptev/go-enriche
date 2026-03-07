@@ -4,7 +4,7 @@
 
 Standalone Go library for web content enrichment: fetch pages, extract article text, parse structured data (JSON-LD/Microdata), search for context, cache results. Stealth HTTP support via go-stealth.
 
-Not an HTTP server. Not an MCP tool. A library that consumers (go-wp, go-content, vaelor) import and call.
+Not an HTTP server. Not an MCP tool. A library that consumers (go-wp, go-nerv, vaelor) import and call.
 
 ## Three-Layer Model
 

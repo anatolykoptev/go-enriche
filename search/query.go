@@ -5,10 +5,12 @@ import (
 	"time"
 )
 
-// Time range constants for SearXNG.
+// Time range constants for search providers.
 const (
+	TimeRangeDay   = "day"
 	TimeRangeWeek  = "week"
 	TimeRangeMonth = "month"
+	TimeRangeYear  = "year"
 )
 
 // Mode constants matching root enriche.Mode values.

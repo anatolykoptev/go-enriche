@@ -13,7 +13,7 @@ Phase 1 complete — extract/ and structured/ packages ready.
 | `extract/` | Article text (trafilatura), facts (structured→regex cascade), og:image, dates |
 | `structured/` | Typed schema.org parsing: Place, Article, Event, Organization |
 | `fetch/` | HTTP fetch with status detection, stealth, singleflight (Phase 2) |
-| `search/` | SearXNG context search (Phase 3) |
+| `search/` | Web search context (DDG, Startpage, Brave, Google providers) |
 | `cache/` | Cache interface + Memory/Redis/Tiered (Phase 3) |
 
 ## Usage

@@ -40,6 +40,11 @@ func (p *Parallel) Search(ctx context.Context, query string, timeRange string) (
 		wg.Add(1)
 		go func(idx int, pr Provider) {
 			defer wg.Done()
+			defer func() {
+				if rv := recover(); rv != nil {
+					results[idx] = providerResult{err: fmt.Errorf("provider panic: %v", rv)}
+				}
+			}()
 			r, err := pr.Search(ctx, query, timeRange)
 			results[idx] = providerResult{result: r, err: err}
 		}(i, prov)

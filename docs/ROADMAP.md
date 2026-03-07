@@ -4,7 +4,8 @@
 
 Reusable Go library for web content enrichment. Fetch pages with stealth, extract article text (trafilatura-grade), parse structured data (JSON-LD + Microdata), search for context via SearXNG. Production-grade with graceful degradation.
 
-Extracted from go-wp's monolithic `tool_enrich.go`. Three consumers: go-wp, go-content, vaelor.
+Extracted from go-wp's monolithic `tool_enrich.go`. Three consumers: go-wp, go-nerv
+, vaelor.
 
 ---
 
@@ -152,7 +153,7 @@ Extracted from go-wp's monolithic `tool_enrich.go`. Three consumers: go-wp, go-c
 
 ## Future
 
-- go-content adapter (Phase 3+ of go-content roadmap)
+- go-nerv adapter (Phase 3+ of go-nerv roadmap)
 - vaelor integration
 - JavaScript rendering via go-rod (optional Fetcher)
 - Sitemap-based batch enrichment
