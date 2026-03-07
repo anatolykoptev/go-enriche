@@ -116,7 +116,5 @@ func (sp *Startpage) Search(ctx context.Context, query string, timeRange string)
 }
 
 func (sp *Startpage) aggregate(results []websearch.Result) *SearchResult {
-	internal := wsToInternal(results)
-	s := &SearXNG{maxResults: sp.maxResults}
-	return s.aggregate(internal)
+	return aggregateResults(toSearchResults(results), sp.maxResults)
 }

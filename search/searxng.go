@@ -11,11 +11,13 @@ import (
 )
 
 const (
-	defaultMaxResults = 3
-	maxResponseBytes  = 2 << 20 // 2 MB
+	maxResponseBytes = 2 << 20 // 2 MB
 )
 
 // SearXNG implements Provider using a SearXNG instance.
+//
+// Deprecated: SearXNG service has been removed. Use DDG, Startpage, Brave, or Google providers instead.
+// This type is kept for backward compatibility but will be removed in a future release.
 type SearXNG struct {
 	baseURL    string
 	client     *http.Client
@@ -36,6 +38,8 @@ func WithMaxResults(n int) SearXNGOption {
 }
 
 // NewSearXNG creates a SearXNG provider.
+//
+// Deprecated: Use NewDDG, NewStartpage, NewBrave, or NewGoogle instead.
 func NewSearXNG(baseURL string, opts ...SearXNGOption) *SearXNG {
 	s := &SearXNG{
 		baseURL:    strings.TrimRight(baseURL, "/"),
@@ -48,12 +52,12 @@ func NewSearXNG(baseURL string, opts ...SearXNGOption) *SearXNG {
 	return s
 }
 
-// searxngResponse is the JSON structure returned by SearXNG API.
-type searxngResponse struct {
-	Results []searxngResult `json:"results"`
+// searxngAPIResponse is the JSON structure returned by SearXNG API.
+type searxngAPIResponse struct {
+	Results []searxngAPIResult `json:"results"`
 }
 
-type searxngResult struct {
+type searxngAPIResult struct {
 	URL     string `json:"url"`
 	Title   string `json:"title"`
 	Content string `json:"content"`
@@ -90,47 +94,21 @@ func (s *SearXNG) Search(ctx context.Context, query string, timeRange string) (*
 		return nil, fmt.Errorf("searxng: read body: %w", err)
 	}
 
-	var data searxngResponse
+	var data searxngAPIResponse
 	if err := json.Unmarshal(body, &data); err != nil {
 		return nil, fmt.Errorf("searxng: parse JSON: %w", err)
 	}
 
-	return s.aggregate(data.Results), nil
-}
-
-func (s *SearXNG) aggregate(results []searxngResult) *SearchResult {
-	var (
-		contextParts []string
-		sources      []string
-		seen         = make(map[string]bool)
-	)
-
-	for _, r := range results {
-		if len(sources) >= s.maxResults {
-			break
-		}
-
-		norm := normalizeURL(r.URL)
-		if norm == "" || seen[norm] {
-			continue
-		}
-		seen[norm] = true
-
-		sources = append(sources, r.URL)
-		switch {
-		case r.Title != "" && r.Content != "":
-			contextParts = append(contextParts, r.Title+": "+r.Content)
-		case r.Content != "":
-			contextParts = append(contextParts, r.Content)
-		case r.Title != "":
-			contextParts = append(contextParts, r.Title)
-		}
+	// Convert SearXNG-specific results to generic search results.
+	generic := make([]searchResult, 0, len(data.Results))
+	for _, r := range data.Results {
+		generic = append(generic, searchResult{
+			URL:     r.URL,
+			Title:   r.Title,
+			Content: r.Content,
+		})
 	}
-
-	return &SearchResult{
-		Context: strings.Join(contextParts, "\n\n"),
-		Sources: sources,
-	}
+	return aggregateResults(generic, s.maxResults), nil
 }
 
 // normalizeURL strips fragment, lowercases host/scheme, removes trailing slash.
