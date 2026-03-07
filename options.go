@@ -109,3 +109,13 @@ func WithSearchFetchLimit(n int) Option {
 		}
 	}
 }
+
+// WithOxBrowser enables ox-browser readability as an additional content
+// extractor. Runs in parallel with trafilatura; the longer result wins.
+func WithOxBrowser(baseURL string) Option {
+	return func(e *Enricher) {
+		if baseURL != "" {
+			e.oxBrowser = fetch.NewOxBrowserClient(baseURL)
+		}
+	}
+}

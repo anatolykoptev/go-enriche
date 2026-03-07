@@ -33,6 +33,7 @@ type Enricher struct {
 	cacheTTL      time.Duration
 	maxContentLen int
 	browserFetch     func(ctx context.Context, url string) (string, error)
+	oxBrowser        *fetch.OxBrowserClient
 	searchFetchLimit int
 	logger           *slog.Logger
 	metrics          *Metrics
