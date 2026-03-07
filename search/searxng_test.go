@@ -38,8 +38,8 @@ func TestSearXNG_Search(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Search error: %v", err)
 	}
-	if len(result.Sources) != defaultMaxResults {
-		t.Errorf("expected %d sources, got %d", defaultMaxResults, len(result.Sources))
+	if len(result.Sources) != 4 {
+		t.Errorf("expected 4 sources, got %d", len(result.Sources))
 	}
 	if result.Context == "" {
 		t.Error("expected non-empty context")

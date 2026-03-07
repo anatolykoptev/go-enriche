@@ -102,11 +102,7 @@ func (s *SearXNG) Search(ctx context.Context, query string, timeRange string) (*
 	// Convert SearXNG-specific results to generic search results.
 	generic := make([]searchResult, 0, len(data.Results))
 	for _, r := range data.Results {
-		generic = append(generic, searchResult{
-			URL:     r.URL,
-			Title:   r.Title,
-			Content: r.Content,
-		})
+		generic = append(generic, searchResult(r))
 	}
 	return aggregateResults(generic, s.maxResults), nil
 }
