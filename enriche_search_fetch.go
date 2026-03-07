@@ -103,24 +103,48 @@ func (e *Enricher) fetchAndExtractSources(
 }
 
 // fetchOneSource fetches a single URL and extracts content + facts.
+// Uses ox-browser readability as fallback when go-stealth fetch fails or yields thin content.
 func (e *Enricher) fetchOneSource(ctx context.Context, srcURL string) sourceResult {
-	fr := e.fetchWithRetry(ctx, srcURL)
-	if fr == nil || fr.HTML == "" {
-		return sourceResult{}
+	// Start ox-browser in parallel if available.
+	type oxOut struct {
+		content string
 	}
+	var oxCh chan *oxOut
+	if e.oxBrowser != nil {
+		oxCh = make(chan *oxOut, 1)
+		go func() {
+			ox, err := e.oxBrowser.Extract(ctx, srcURL)
+			if err != nil || ox == nil {
+				oxCh <- nil
+				return
+			}
+			oxCh <- &oxOut{content: ox.Content}
+		}()
+	}
+
+	fr := e.fetchWithRetry(ctx, srcURL)
 
 	var sr sourceResult
 
-	pageURL, _ := url.Parse(srcURL)
-	tr, err := extract.ExtractText(
-		strings.NewReader(fr.HTML), pageURL, extract.WithFormat(e.format),
-	)
-	if err == nil && tr != nil {
-		sr.content = tr.Content
-		sr.image = tr.Image
+	if fr != nil && fr.HTML != "" {
+		pageURL, _ := url.Parse(srcURL)
+		tr, err := extract.ExtractText(
+			strings.NewReader(fr.HTML), pageURL, extract.WithFormat(e.format),
+		)
+		if err == nil && tr != nil {
+			sr.content = tr.Content
+			sr.image = tr.Image
+		}
+		sr.facts = extract.ExtractFacts(fr.HTML, srcURL)
 	}
 
-	sr.facts = extract.ExtractFacts(fr.HTML, srcURL)
+	// Merge ox-browser: use if longer.
+	if oxCh != nil {
+		if ox := <-oxCh; ox != nil && len([]rune(ox.content)) > len([]rune(sr.content)) {
+			sr.content = ox.content
+		}
+	}
+
 	return sr
 }
 
