@@ -3,12 +3,29 @@
 package search
 
 import (
+	"net/url"
 	"strings"
 
 	"github.com/anatolykoptev/go-stealth/websearch"
 )
 
-const defaultMaxResults = 8
+const (
+	defaultMaxResults = 8
+	maxResponseBytes  = 2 << 20 // 2 MB
+)
+
+// normalizeURL strips fragment, lowercases host/scheme, removes www. prefix and trailing slash.
+func normalizeURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	u.Fragment = ""
+	u.Host = strings.TrimPrefix(strings.ToLower(u.Host), "www.")
+	u.Scheme = strings.ToLower(u.Scheme)
+	result := u.String()
+	return strings.TrimRight(result, "/")
+}
 
 // searchResult is the internal generic search result used across all providers.
 type searchResult struct {

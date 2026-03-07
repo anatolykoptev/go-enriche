@@ -48,9 +48,9 @@ func NewOxBrowser(baseURL string, opts ...OxBrowserOption) *OxBrowser {
 
 // oxFetchResponse is the JSON response from ox-browser /fetch.
 type oxFetchResponse struct {
-	Content    string `json:"content"`
-	StatusCode int    `json:"status_code"`
-	Error      string `json:"error,omitempty"`
+	Body   string `json:"body"`
+	Status int    `json:"status"`
+	Error  string `json:"error,omitempty"`
 }
 
 // Search fetches DuckDuckGo HTML via ox-browser and parses results.
@@ -91,9 +91,12 @@ func (o *OxBrowser) Search(ctx context.Context, query string, _ string) (*Search
 	if fr.Error != "" {
 		return nil, fmt.Errorf("oxbrowser search: %s", fr.Error)
 	}
+	if fr.Status != http.StatusOK {
+		return nil, fmt.Errorf("oxbrowser search: upstream HTTP %d", fr.Status)
+	}
 
 	// Parse DDG HTML using go-stealth websearch parser.
-	wsResults, err := websearch.ParseDDGHTML([]byte(fr.Content))
+	wsResults, err := websearch.ParseDDGHTML([]byte(fr.Body))
 	if err != nil {
 		return nil, fmt.Errorf("oxbrowser search: parse DDG HTML: %w", err)
 	}

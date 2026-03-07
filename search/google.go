@@ -67,13 +67,13 @@ type googleResult struct {
 // timeRangeToGoogleDateRestrict maps enriche time ranges to Google dateRestrict values.
 func timeRangeToGoogleDateRestrict(timeRange string) string {
 	switch timeRange {
-	case "week":
+	case TimeRangeWeek:
 		return "w1"
-	case "month":
+	case TimeRangeMonth:
 		return "m1"
-	case "day":
+	case TimeRangeDay:
 		return "d1"
-	case "year":
+	case TimeRangeYear:
 		return "y1"
 	default:
 		return ""

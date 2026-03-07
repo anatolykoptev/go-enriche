@@ -3,7 +3,6 @@ package enriche
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -394,39 +393,24 @@ func TestEnrich_SearchError(t *testing.T) {
 	}
 }
 
-func TestEnrich_WithSearXNG(t *testing.T) {
+func TestEnrich_WithSearchProvider(t *testing.T) {
 	t.Parallel()
-	type searxResult struct {
-		URL     string `json:"url"`
-		Title   string `json:"title"`
-		Content string `json:"content"`
+	provider := &mockProvider{
+		result: &search.SearchResult{
+			Context: "Source 1: Info about topic",
+			Sources: []string{"https://src.com/1"},
+		},
 	}
-	type searxResponse struct {
-		Results []searxResult `json:"results"`
-	}
-
-	searxSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		resp := searxResponse{
-			Results: []searxResult{
-				{URL: "https://src.com/1", Title: "Source 1", Content: "Info about topic"},
-			},
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp) //nolint:errcheck
-	}))
-	defer searxSrv.Close()
-
-	provider := search.NewSearXNG(searxSrv.URL)
 	e := New(WithSearch(provider))
 	result, err := e.Enrich(context.Background(), Item{
-		Name: "Real SearXNG",
+		Name: "Test Search",
 		Mode: ModeNews,
 	})
 	if err != nil {
 		t.Fatalf("Enrich error: %v", err)
 	}
 	if len(result.SearchSources) == 0 {
-		t.Error("expected search sources from SearXNG")
+		t.Error("expected search sources")
 	}
 }
 

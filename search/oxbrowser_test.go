@@ -32,7 +32,7 @@ func TestOxBrowser_Search(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"content":` + mustJSON(minimalDDGHTML) + `,"status_code":200}`))
+		_, _ = w.Write([]byte(`{"body":` + mustJSON(minimalDDGHTML) + `,"status":200}`))
 	}))
 	defer srv.Close()
 
@@ -69,7 +69,7 @@ func TestOxBrowser_FetchError(t *testing.T) {
 func TestOxBrowser_OxBrowserError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"content":"","status_code":403,"error":"blocked by Cloudflare"}`))
+		_, _ = w.Write([]byte(`{"body":"","status":403,"error":"blocked by Cloudflare"}`))
 	}))
 	defer srv.Close()
 

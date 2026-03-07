@@ -69,13 +69,13 @@ type braveResult struct {
 // timeRangeToBraveFreshness maps enriche time ranges to Brave freshness values.
 func timeRangeToBraveFreshness(timeRange string) string {
 	switch timeRange {
-	case "week":
+	case TimeRangeWeek:
 		return "pw"
-	case "month":
+	case TimeRangeMonth:
 		return "pm"
-	case "day":
+	case TimeRangeDay:
 		return "pd"
-	case "year":
+	case TimeRangeYear:
 		return "py"
 	default:
 		return ""
