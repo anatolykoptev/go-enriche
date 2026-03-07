@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/url"
 	"strings"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/anatolykoptev/go-enriche/extract"
 )
@@ -53,43 +54,74 @@ func (e *Enricher) searchSourcesToFetch(result *Result) []string {
 	return sources
 }
 
-// fetchAndExtractSources fetches each URL, extracts text and facts.
+// sourceResult holds per-URL extraction output for ordered assembly.
+type sourceResult struct {
+	content string
+	facts   extract.Facts
+	image   string
+}
+
+// fetchAndExtractSources fetches URLs in parallel, extracts text and facts.
+// Results are assembled in original order to keep content deterministic.
 func (e *Enricher) fetchAndExtractSources(
 	ctx context.Context, sources []string, result *Result,
-) (contents []string, fetchedAny bool) {
-	for _, srcURL := range sources {
-		if ctx.Err() != nil {
-			break
-		}
+) ([]string, bool) {
+	results := make([]sourceResult, len(sources))
 
-		fr := e.fetchWithRetry(ctx, srcURL)
-		if fr == nil || fr.HTML == "" {
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(len(sources)) // all in parallel
+
+	for i, srcURL := range sources {
+		g.Go(func() error {
+			results[i] = e.fetchOneSource(gctx, srcURL)
+			return nil
+		})
+	}
+	_ = g.Wait()
+
+	// Assemble in order: merge facts, collect content, pick first image.
+	var contents []string
+	fetchedAny := false
+
+	for _, sr := range results {
+		if sr.content == "" && sr.facts == (extract.Facts{}) {
 			continue
 		}
 		fetchedAny = true
 
-		contents = e.extractSourceContent(srcURL, fr.HTML, contents, result)
-		mergeFacts(extract.ExtractFacts(fr.HTML, srcURL), &result.Facts)
+		if sr.content != "" {
+			contents = append(contents, sr.content)
+		}
+		mergeFacts(sr.facts, &result.Facts)
+		if result.Image == nil && sr.image != "" {
+			img := sr.image
+			result.Image = &img
+		}
 	}
+
 	return contents, fetchedAny
 }
 
-// extractSourceContent extracts text from a fetched page and appends to contents.
-func (e *Enricher) extractSourceContent(
-	srcURL, html string, contents []string, result *Result,
-) []string {
-	pageURL, _ := url.Parse(srcURL)
-	tr, err := extract.ExtractText(
-		strings.NewReader(html), pageURL, extract.WithFormat(e.format),
-	)
-	if err != nil || tr == nil || tr.Content == "" {
-		return contents
+// fetchOneSource fetches a single URL and extracts content + facts.
+func (e *Enricher) fetchOneSource(ctx context.Context, srcURL string) sourceResult {
+	fr := e.fetchWithRetry(ctx, srcURL)
+	if fr == nil || fr.HTML == "" {
+		return sourceResult{}
 	}
 
-	if result.Image == nil && tr.Image != "" {
-		result.Image = &tr.Image
+	var sr sourceResult
+
+	pageURL, _ := url.Parse(srcURL)
+	tr, err := extract.ExtractText(
+		strings.NewReader(fr.HTML), pageURL, extract.WithFormat(e.format),
+	)
+	if err == nil && tr != nil {
+		sr.content = tr.Content
+		sr.image = tr.Image
 	}
-	return append(contents, tr.Content)
+
+	sr.facts = extract.ExtractFacts(fr.HTML, srcURL)
+	return sr
 }
 
 // mergeFacts copies non-nil fields from src into dst (fill-nil-only).
