@@ -1,6 +1,7 @@
 package enriche
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -85,9 +86,26 @@ func WithGeocoder(g *maps.Geocoder) Option {
 	return func(e *Enricher) { e.geocoder = g }
 }
 
+// WithBrowserFetch sets a headless browser fallback for JS-heavy pages.
+// When content extracted via HTTP fetch is thin (< 200 chars), the browser
+// function re-renders the page and extraction is retried on the rendered HTML.
+func WithBrowserFetch(fn func(ctx context.Context, url string) (string, error)) Option {
+	return func(e *Enricher) { e.browserFetch = fn }
+}
+
 // WithFormat sets the output format for extracted content.
 // Default is extract.FormatText (plain text, current behavior).
 // Use extract.FormatMarkdown to preserve links, headings, and formatting.
 func WithFormat(f extract.Format) Option {
 	return func(e *Enricher) { e.format = f }
+}
+
+// WithSearchFetchLimit sets the max number of search result URLs to fetch
+// when the item has no primary URL. Default: 5.
+func WithSearchFetchLimit(n int) Option {
+	return func(e *Enricher) {
+		if n > 0 {
+			e.searchFetchLimit = n
+		}
+	}
 }
