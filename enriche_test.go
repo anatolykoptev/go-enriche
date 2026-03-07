@@ -153,10 +153,15 @@ func TestEnrich_WithCache(t *testing.T) {
 
 func TestEnrich_NoURL_SearchOnly(t *testing.T) {
 	t.Parallel()
+
+	// Source server to be fetched from search results.
+	srcSrv := newTestServer(testHTML, http.StatusOK)
+	defer srcSrv.Close()
+
 	mock := &mockProvider{
 		result: &search.SearchResult{
 			Context: "found via search",
-			Sources: []string{"https://found.com"},
+			Sources: []string{srcSrv.URL},
 		},
 	}
 
@@ -171,9 +176,28 @@ func TestEnrich_NoURL_SearchOnly(t *testing.T) {
 	if result.SearchContext != "found via search" {
 		t.Errorf("expected search context, got %q", result.SearchContext)
 	}
-	// No URL → no fetch → status should be zero value.
+	// No URL → search sources fetched → status should be active.
+	if result.Status != StatusActive {
+		t.Errorf("expected StatusActive from search sources, got %q", result.Status)
+	}
+	if result.Content == "" {
+		t.Error("expected content from search source fetch, got empty")
+	}
+}
+
+func TestEnrich_NoURL_NoSearch(t *testing.T) {
+	t.Parallel()
+	// No search provider → no sources → status stays empty.
+	e := New()
+	result, err := e.Enrich(context.Background(), Item{
+		Name: "Minimal NoURL",
+		Mode: ModeNews,
+	})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
 	if result.Status != "" {
-		t.Errorf("expected empty status for search-only, got %q", result.Status)
+		t.Errorf("expected empty status, got %q", result.Status)
 	}
 }
 

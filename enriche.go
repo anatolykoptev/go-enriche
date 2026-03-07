@@ -32,8 +32,10 @@ type Enricher struct {
 	concurrency   int
 	cacheTTL      time.Duration
 	maxContentLen int
-	logger        *slog.Logger
-	metrics       *Metrics
+	browserFetch     func(ctx context.Context, url string) (string, error)
+	searchFetchLimit int
+	logger           *slog.Logger
+	metrics          *Metrics
 }
 
 // discardHandler silently discards all log records.
@@ -98,6 +100,11 @@ func (e *Enricher) Enrich(ctx context.Context, item Item) (*Result, error) {
 	// Search.
 	if e.search != nil {
 		e.doSearch(ctx, item, result)
+	}
+
+	// When no primary URL, fetch top search source URLs for content + facts.
+	if item.URL == "" && result.Content == "" {
+		e.fetchSearchSources(ctx, item, result)
 	}
 
 	// Cache store.
