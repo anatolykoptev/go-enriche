@@ -18,13 +18,6 @@ var (
 	reSnippetPrice   = regexp.MustCompile(`(?i)(?:цена|стоимость|price)[:\s]+([^\n]{2,80})`)
 )
 
-// Validators for snippet-extracted facts to filter out search title junk.
-var (
-	// Address must contain a street-type word (ул., пр., наб., пер., ш., д., пл., etc.).
-	reAddressValidator = regexp.MustCompile(`(?i)(?:ул\.|улица|пр\.|просп|проспект|наб\.|набережная|пер\.|переулок|ш\.|шоссе|пл\.|площадь|б-р|бульвар|линия|остров|город\b|г\.)`)
-	// Price must contain a digit.
-	rePriceValidator = regexp.MustCompile(`\d`)
-)
 
 // regexAddress extracts an address from text using regex.
 func regexAddress(text string) *string {
