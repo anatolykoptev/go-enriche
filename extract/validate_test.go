@@ -52,3 +52,51 @@ func TestValidatePhone(t *testing.T) {
 		})
 	}
 }
+
+func TestValidatePrice(t *testing.T) {
+	valid := []struct {
+		name  string
+		price string
+	}{
+		{"digits only", "500"},
+		{"range with currency", "от 500 до 1500 рублей"},
+		{"rub short", "300 руб."},
+		{"dollar sign", "$25"},
+		{"free russian", "бесплатно"},
+		{"zero", "0"},
+		{"range with symbol", "1500-2500 ₽"},
+		{"from price", "от 200 рублей"},
+		{"currency symbols", "₽₽"},
+	}
+
+	for _, tc := range valid {
+		t.Run("valid/"+tc.name, func(t *testing.T) {
+			if !ValidatePrice(tc.price) {
+				t.Errorf("expected valid: %s", tc.price)
+			}
+		})
+	}
+
+	invalid := []struct {
+		name  string
+		price string
+	}{
+		{"css inline", `not(:empty){margin-top:4px}.business-card-bko-view__products{padding:12px 0}.bus`},
+		{"html tag", `<span class="price">500</span>`},
+		{"long text", "и адрес. Мы могли отвезти в Сестрорецк начос за 200 рублей, при этом потратив в"},
+		{"js code", "var price = 500;"},
+		{"json", `{"price": 500, "currency": "RUB"}`},
+		{"empty", ""},
+		{"spaces", "   "},
+		{"url", "https://example.com/price"},
+		{"css class", ".price-block{display:none}"},
+	}
+
+	for _, tc := range invalid {
+		t.Run("invalid/"+tc.name, func(t *testing.T) {
+			if ValidatePrice(tc.price) {
+				t.Errorf("expected invalid: %s", tc.price)
+			}
+		})
+	}
+}
