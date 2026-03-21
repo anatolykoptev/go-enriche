@@ -1,6 +1,9 @@
 package extract
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestValidatePhone(t *testing.T) {
 	valid := []struct {
@@ -96,6 +99,57 @@ func TestValidatePrice(t *testing.T) {
 		t.Run("invalid/"+tc.name, func(t *testing.T) {
 			if ValidatePrice(tc.price) {
 				t.Errorf("expected invalid: %s", tc.price)
+			}
+		})
+	}
+}
+
+func TestValidateAddress(t *testing.T) {
+	valid := []struct {
+		name string
+		addr string
+	}{
+		{"russian street short", "ул. Пушкина, 10"},
+		{"prospect full", "Невский проспект, 100"},
+		{"prospect abbrev", "пр. Стачек, 45"},
+		{"pereulok with city", "пер. Озерный, 7, Санкт-Петербург"},
+		{"embankment", "наб. канала Грибоедова, 22"},
+		{"highway", "Приморское ш., 427"},
+		{"square", "пл. Островского, 6"},
+		{"boulevard", "Конногвардейский б-р, 4"},
+		{"korpus", "ул. Марата, 10, корп. 2"},
+		{"english street", "123 Main Street, Springfield"},
+		{"english st", "42 Baker St, London"},
+	}
+
+	for _, tc := range valid {
+		t.Run("valid/"+tc.name, func(t *testing.T) {
+			if !ValidateAddress(tc.addr) {
+				t.Errorf("expected valid: %s", tc.addr)
+			}
+		})
+	}
+
+	invalid := []struct {
+		name string
+		addr string
+	}{
+		{"page title marketing", "Кафе «Nothing Fancy» Санкт-Петербург: бронирование, цены, меню, адрес"},
+		{"listing marketing", "объекта: Красного Текстильщика д. 10-12, лит. У. Напрямую от собственника, без комиссии."},
+		{"culture ref", "и т. д. на официальном сайте Культура.РФ"},
+		{"css", "margin: 0 auto; padding: 10px"},
+		{"too long", strings.Repeat("a", 200)},
+		{"empty", ""},
+		{"url", "https://example.com/address"},
+		{"meta desc", "Бар «Пробирочная» Санкт-Петербург: бронирование, цены, меню, адрес и фото"},
+		{"just city no street", "Санкт-Петербург"},
+		{"ad text", "Аренда от собственника. Без комиссии. Офис 50 кв.м."},
+	}
+
+	for _, tc := range invalid {
+		t.Run("invalid/"+tc.name, func(t *testing.T) {
+			if ValidateAddress(tc.addr) {
+				t.Errorf("expected invalid: %s", tc.addr)
 			}
 		})
 	}
