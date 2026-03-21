@@ -3,9 +3,54 @@ package extract
 import (
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 var reDigitsOnly = regexp.MustCompile(`\D`)
+
+const maxPriceLen = 60
+
+var (
+	reCSS           = regexp.MustCompile(`[{}]|\w+\s*:\s*\w+\s*;|:\s*\w+\(|margin|padding|display|font-size`)
+	reHTMLTag       = regexp.MustCompile(`<[a-zA-Z/]`)
+	reJSCode        = regexp.MustCompile(`(?:var |const |let |function |=>|===)`)
+	rePriceCurrency = regexp.MustCompile(`(?i)(?:\d|бесплатно|free|₽|руб|\$|€|£)`)
+)
+
+// ValidatePrice checks if a price string looks like an actual price
+// rather than CSS, HTML, JS code, or unrelated text.
+func ValidatePrice(price string) bool {
+	price = strings.TrimSpace(price)
+	if price == "" {
+		return false
+	}
+
+	if len([]rune(price)) > maxPriceLen {
+		return false
+	}
+
+	if !rePriceCurrency.MatchString(price) {
+		return false
+	}
+
+	if reCSS.MatchString(price) {
+		return false
+	}
+
+	if reHTMLTag.MatchString(price) {
+		return false
+	}
+
+	if reJSCode.MatchString(price) {
+		return false
+	}
+
+	if strings.Contains(price, "://") {
+		return false
+	}
+
+	return true
+}
 
 // validCodeRanges defines valid Russian area/operator code ranges (Rossvyaz).
 var validCodeRanges = [][2]int{
