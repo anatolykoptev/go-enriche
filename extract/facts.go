@@ -52,11 +52,11 @@ func applyPlaceFacts(data *structured.Data, facts *Facts) {
 	}
 	setIfNil(&facts.PlaceName, place.Name)
 	setIfNil(&facts.PlaceType, place.Type)
-	setIfNil(&facts.Address, place.Address)
-	setIfNil(&facts.Phone, place.Phone)
+	setIfValid(&facts.Address, place.Address, ValidateAddress)
+	setIfValid(&facts.Phone, place.Phone, ValidatePhone)
 	setIfNil(&facts.Website, place.Website)
 	setIfNil(&facts.Hours, place.Hours)
-	setIfNil(&facts.Price, place.Price)
+	setIfValid(&facts.Price, place.Price, ValidatePrice)
 }
 
 func applyArticleFacts(data *structured.Data, facts *Facts) {
@@ -74,8 +74,8 @@ func applyEventFacts(data *structured.Data, facts *Facts) {
 	}
 	setIfNil(&facts.PlaceName, event.Name)
 	setIfNil(&facts.EventDate, event.StartDate)
-	setIfNil(&facts.Price, event.Price)
-	setIfNil(&facts.Address, event.Location)
+	setIfValid(&facts.Price, event.Price, ValidatePrice)
+	setIfValid(&facts.Address, event.Location, ValidateAddress)
 }
 
 func applyOrgFacts(data *structured.Data, facts *Facts) {
@@ -85,42 +85,60 @@ func applyOrgFacts(data *structured.Data, facts *Facts) {
 	}
 	setIfNil(&facts.PlaceName, org.Name)
 	setIfNil(&facts.Website, org.URL)
-	setIfNil(&facts.Phone, org.Phone)
-	setIfNil(&facts.Address, org.Address)
+	setIfValid(&facts.Phone, org.Phone, ValidatePhone)
+	setIfValid(&facts.Address, org.Address, ValidateAddress)
 }
 
 func applyRegexFallback(html string, facts *Facts) {
 	if facts.Address == nil {
-		facts.Address = regexAddress(html)
+		if addr := regexAddress(html); addr != nil && ValidateAddress(*addr) {
+			facts.Address = addr
+		}
 	}
 	if facts.Phone == nil {
-		facts.Phone = regexPhone(html)
+		if phone := regexPhone(html); phone != nil && ValidatePhone(*phone) {
+			facts.Phone = phone
+		}
 	}
 	if facts.Price == nil {
-		facts.Price = regexPrice(html)
+		if price := regexPrice(html); price != nil && ValidatePrice(*price) {
+			facts.Price = price
+		}
 	}
 }
 
 // ExtractSnippetFacts extracts address/phone/price from plain-text snippets.
 // Only fills nil fields in existing facts — never overwrites.
+// Validates extracted values to avoid search-title junk (e.g. "адрес и фото").
 func ExtractSnippetFacts(text string, facts *Facts) {
 	if text == "" || facts == nil {
 		return
 	}
 	if facts.Address == nil {
-		facts.Address = regexSubmatch(reSnippetAddress, text)
+		if addr := regexSubmatch(reSnippetAddress, text); addr != nil && reAddressValidator.MatchString(*addr) {
+			facts.Address = addr
+		}
 	}
 	if facts.Phone == nil {
 		facts.Phone = regexMatch(rePhone, text)
 	}
 	if facts.Price == nil {
-		facts.Price = regexSubmatch(reSnippetPrice, text)
+		if price := regexSubmatch(reSnippetPrice, text); price != nil && rePriceValidator.MatchString(*price) {
+			facts.Price = price
+		}
 	}
 }
 
 // setIfNil sets *dst to src if *dst is currently nil and src is non-nil.
 func setIfNil(dst **string, src *string) {
 	if *dst == nil && src != nil {
+		*dst = src
+	}
+}
+
+// setIfValid sets *dst to src if *dst is nil, src is non-nil, and validate returns true.
+func setIfValid(dst **string, src *string, validate func(string) bool) {
+	if *dst == nil && src != nil && validate(*src) {
 		*dst = src
 	}
 }
