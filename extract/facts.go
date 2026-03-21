@@ -115,15 +115,17 @@ func ExtractSnippetFacts(text string, facts *Facts) {
 		return
 	}
 	if facts.Address == nil {
-		if addr := regexSubmatch(reSnippetAddress, text); addr != nil && reAddressValidator.MatchString(*addr) {
+		if addr := regexSubmatch(reSnippetAddress, text); addr != nil && ValidateAddress(*addr) {
 			facts.Address = addr
 		}
 	}
 	if facts.Phone == nil {
-		facts.Phone = regexMatch(rePhone, text)
+		if phone := regexMatch(rePhone, text); phone != nil && ValidatePhone(*phone) {
+			facts.Phone = phone
+		}
 	}
 	if facts.Price == nil {
-		if price := regexSubmatch(reSnippetPrice, text); price != nil && rePriceValidator.MatchString(*price) {
+		if price := regexSubmatch(reSnippetPrice, text); price != nil && ValidatePrice(*price) {
 			facts.Price = price
 		}
 	}
