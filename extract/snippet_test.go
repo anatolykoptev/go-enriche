@@ -147,6 +147,27 @@ func TestExtractSnippetFacts_AcceptsRealAddress(t *testing.T) {
 	}
 }
 
+func TestExtractSnippetFacts_RejectsGarbagePhone(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		text string
+	}{
+		{"random digits", "Контакт: 81063196745, ежедневно"},
+		{"invalid area", "Телефон: 80684534804"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var facts Facts
+			ExtractSnippetFacts(tt.text, &facts)
+			if facts.Phone != nil {
+				t.Errorf("expected nil phone for %q, got %q", tt.text, *facts.Phone)
+			}
+		})
+	}
+}
+
 func TestExtractSnippetFacts_AcceptsRealPrice(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
