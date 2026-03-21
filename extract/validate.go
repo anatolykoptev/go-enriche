@@ -76,6 +76,54 @@ func ValidatePhone(phone string) bool {
 	return isValidAreaCode(code)
 }
 
+var reStreetWord = regexp.MustCompile(`(?i)(?:` +
+	`ул\.|улица|пр\.|просп|проспект|наб\.|набережная|пер\.|переулок|` +
+	`ш\.|шоссе|пл\.|площадь|б-р|бульвар|линия|аллея|остров|` +
+	`город\b|г\.\s*\w|` +
+	`д\.\s*\d|корп\.|стр\.|лит\.|` +
+	`\bstreet\b|\bst\b\.?|\bavenue\b|\bave\b\.?|\broad\b|\brd\b\.?|\bdrive\b|\blane\b|\bblvd\b` +
+	`)`)
+
+var reMarketingJunk = regexp.MustCompile(`(?i)(?:бронирование|меню|цены|как пройти|режим работы|` +
+	`собственник|без комиссии|аренда|официальном сайте|подробнее|интересные факты|фото)`)
+
+const (
+	addrMinLen = 8
+	addrMaxLen = 120
+)
+
+// ValidateAddress checks if a string looks like a real postal address
+// rather than a page title, marketing text, CSS, or URL.
+func ValidateAddress(addr string) bool {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return false
+	}
+
+	runeLen := len([]rune(addr))
+	if runeLen < addrMinLen || runeLen > addrMaxLen {
+		return false
+	}
+
+	if !reStreetWord.MatchString(addr) {
+		return false
+	}
+
+	if reMarketingJunk.MatchString(addr) {
+		return false
+	}
+
+	if reCSS.MatchString(addr) {
+		return false
+	}
+
+	if strings.Contains(addr, "://") {
+		return false
+	}
+
+	return true
+}
+
 func isValidAreaCode(code int) bool {
 	for _, r := range validCodeRanges {
 		if code >= r[0] && code <= r[1] {
