@@ -48,14 +48,14 @@ func TestExtractFacts_JSONLDPriority(t *testing.T) {
 	t.Parallel()
 	html := `<html><head>
 	<script type="application/ld+json">
-	{"@context":"https://schema.org","@type":"Place","telephone":"+7-111-222-33-44"}
+	{"@context":"https://schema.org","@type":"Place","telephone":"+7-812-222-33-44"}
 	</script>
 	</head><body>
-	<p>Телефон: +7 (999) 888-77-66</p>
+	<p>Телефон: +7 (921) 888-77-66</p>
 	</body></html>`
 
 	facts := ExtractFacts(html, "https://example.com")
-	assertFactPtr(t, "Phone", facts.Phone, "+7-111-222-33-44")
+	assertFactPtr(t, "Phone", facts.Phone, "+7-812-222-33-44")
 }
 
 func TestExtractFacts_EmptyHTML(t *testing.T) {
@@ -76,6 +76,71 @@ func TestExtractFacts_EventDate(t *testing.T) {
 
 	facts := ExtractFacts(html, "https://example.com")
 	assertFactPtr(t, "EventDate", facts.EventDate, "2026-04-01")
+}
+
+func TestExtractFacts_RejectsGarbagePhone(t *testing.T) {
+	t.Parallel()
+	html := `<html><head>
+	<script type="application/ld+json">
+	{"@context":"https://schema.org","@type":"Restaurant","telephone":"81063196745"}
+	</script>
+	</head><body></body></html>`
+	facts := ExtractFacts(html, "https://example.com")
+	if facts.Phone != nil {
+		t.Errorf("expected nil phone for garbage number, got %q", *facts.Phone)
+	}
+}
+
+func TestExtractFacts_RejectsGarbagePrice(t *testing.T) {
+	t.Parallel()
+	html := `<html><head>
+	<script type="application/ld+json">
+	{"@context":"https://schema.org","@type":"Restaurant","priceRange":"not(:empty){margin-top:4px}"}
+	</script>
+	</head><body></body></html>`
+	facts := ExtractFacts(html, "https://example.com")
+	if facts.Price != nil {
+		t.Errorf("expected nil price for CSS garbage, got %q", *facts.Price)
+	}
+}
+
+func TestExtractFacts_RejectsGarbageAddress(t *testing.T) {
+	t.Parallel()
+	html := `<html><head>
+	<script type="application/ld+json">
+	{"@context":"https://schema.org","@type":"Place","address":"и т. д. на официальном сайте Культура.РФ"}
+	</script>
+	</head><body></body></html>`
+	facts := ExtractFacts(html, "https://example.com")
+	if facts.Address != nil {
+		t.Errorf("expected nil address for junk, got %q", *facts.Address)
+	}
+}
+
+func TestExtractFacts_AcceptsValidStructuredData(t *testing.T) {
+	t.Parallel()
+	html := `<html><head>
+	<script type="application/ld+json">
+	{
+		"@context":"https://schema.org",
+		"@type":"Restaurant",
+		"name":"Good Cafe",
+		"telephone":"+7 (812) 555-12-34",
+		"address":{"@type":"PostalAddress","streetAddress":"ул. Рубинштейна, 10","addressLocality":"Санкт-Петербург"},
+		"priceRange":"1500-2500 ₽"
+	}
+	</script>
+	</head><body></body></html>`
+	facts := ExtractFacts(html, "https://example.com")
+	if facts.Phone == nil {
+		t.Error("expected valid phone")
+	}
+	if facts.Address == nil {
+		t.Error("expected valid address")
+	}
+	if facts.Price == nil {
+		t.Error("expected valid price")
+	}
 }
 
 func assertFactPtr(t *testing.T, field string, got *string, want string) {
