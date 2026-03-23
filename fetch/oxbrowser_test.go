@@ -9,7 +9,7 @@ import (
 
 func TestOxBrowserExtract(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/readability" {
+		if r.URL.Path != "/read" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		if r.Method != http.MethodPost {

@@ -16,13 +16,13 @@ const (
 	errorPreviewBytes = 200
 )
 
-// OxBrowserClient calls ox-browser's /readability endpoint for content extraction.
+// OxBrowserClient calls ox-browser's /read endpoint for content extraction.
 type OxBrowserClient struct {
 	baseURL string
 	client  *http.Client
 }
 
-// NewOxBrowserClient creates a client for the ox-browser readability API.
+// NewOxBrowserClient creates a client for the ox-browser read API.
 func NewOxBrowserClient(baseURL string) *OxBrowserClient {
 	return &OxBrowserClient{
 		baseURL: strings.TrimRight(baseURL, "/"),
@@ -30,7 +30,7 @@ func NewOxBrowserClient(baseURL string) *OxBrowserClient {
 	}
 }
 
-// ReadabilityResult is the response from ox-browser /readability.
+// ReadabilityResult is the response from ox-browser /read.
 type ReadabilityResult struct {
 	Title     string `json:"title"`
 	Content   string `json:"content"`
@@ -41,11 +41,11 @@ type ReadabilityResult struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// Extract calls ox-browser /readability and returns extracted content.
+// Extract calls ox-browser /read and returns extracted content.
 func (c *OxBrowserClient) Extract(ctx context.Context, pageURL string) (*ReadabilityResult, error) {
-	body := fmt.Sprintf(`{"url":%q,"plain_text":true}`, pageURL)
+	body := fmt.Sprintf(`{"url":%q}`, pageURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		c.baseURL+"/readability", strings.NewReader(body))
+		c.baseURL+"/read", strings.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
