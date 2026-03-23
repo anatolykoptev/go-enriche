@@ -4,6 +4,7 @@ package enriche
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -23,15 +24,15 @@ const (
 
 // Enricher orchestrates web content enrichment.
 type Enricher struct {
-	fetcher       *fetch.Fetcher
-	cache         cache.Cache
-	search        search.Provider
-	mapsChecker maps.Checker
-	geocoder    *maps.Geocoder
-	format        extract.Format
-	concurrency   int
-	cacheTTL      time.Duration
-	maxContentLen int
+	fetcher          *fetch.Fetcher
+	cache            cache.Cache
+	search           search.Provider
+	mapsChecker      maps.Checker
+	geocoder         *maps.Geocoder
+	format           extract.Format
+	concurrency      int
+	cacheTTL         time.Duration
+	maxContentLen    int
 	browserFetch     func(ctx context.Context, url string) (string, error)
 	oxBrowser        *fetch.OxBrowserClient
 	searchFetchLimit int
@@ -45,7 +46,7 @@ type discardHandler struct{}
 func (discardHandler) Enabled(context.Context, slog.Level) bool  { return false }
 func (discardHandler) Handle(context.Context, slog.Record) error { return nil }
 func (d discardHandler) WithAttrs([]slog.Attr) slog.Handler      { return d }
-func (d discardHandler) WithGroup(string) slog.Handler            { return d }
+func (d discardHandler) WithGroup(string) slog.Handler           { return d }
 
 // New creates an Enricher with the given options.
 func New(opts ...Option) *Enricher {
@@ -204,6 +205,14 @@ func (e *Enricher) doSearch(ctx context.Context, item Item, result *Result) {
 
 	// Extract facts from search snippets (fills nil fields only).
 	extract.ExtractSnippetFacts(sr.Context, &result.Facts)
+}
+
+// Search exposes the configured search provider for direct queries.
+func (e *Enricher) Search(ctx context.Context, query, timeRange string) (*search.SearchResult, error) {
+	if e.search == nil {
+		return nil, errors.New("search provider not configured")
+	}
+	return e.search.Search(ctx, query, timeRange)
 }
 
 func cacheKey(item Item) string {
