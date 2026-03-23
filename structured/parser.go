@@ -49,6 +49,30 @@ func (d *Data) FirstPlace() *Place {
 	return nil
 }
 
+// Places returns all Place entities found in structured data.
+func (d *Data) Places() []*Place {
+	var places []*Place
+	for _, item := range d.raw.Items {
+		for _, t := range placeTypes {
+			if item.IsOfSchemaType(t) {
+				places = append(places, itemToPlace(item))
+				break
+			}
+		}
+		if graph, ok := item.GetNested("@graph"); ok {
+			for _, gitem := range graph.Items {
+				for _, t := range placeTypes {
+					if gitem.IsOfSchemaType(t) {
+						places = append(places, itemToPlace(gitem))
+						break
+					}
+				}
+			}
+		}
+	}
+	return places
+}
+
 // FirstArticle finds the first Article-like item.
 func (d *Data) FirstArticle() *Article {
 	for _, t := range []string{typeArticle, typeNewsArticle, typeBlogPosting, typeWebPage} {
