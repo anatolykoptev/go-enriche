@@ -32,13 +32,14 @@ func NewOxBrowserClient(baseURL string) *OxBrowserClient {
 
 // ReadabilityResult is the response from ox-browser /read.
 type ReadabilityResult struct {
-	Title     string `json:"title"`
-	Content   string `json:"content"`
-	Author    string `json:"author"`
-	Excerpt   string `json:"excerpt"`
-	Length    int    `json:"length"`
-	ElapsedMs int    `json:"elapsed_ms"`
-	Error     string `json:"error,omitempty"`
+	Title     string            `json:"title"`
+	Content   string            `json:"content"`
+	Author    string            `json:"author"`
+	Excerpt   string            `json:"excerpt"`
+	Length    int               `json:"length"`
+	ElapsedMs int               `json:"elapsed_ms"`
+	JsonLD    []json.RawMessage `json:"json_ld,omitempty"`
+	Error     string            `json:"error,omitempty"`
 }
 
 // Extract calls ox-browser /read and returns extracted content.
