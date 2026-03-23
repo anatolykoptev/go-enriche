@@ -175,6 +175,43 @@ func TestParse_AddressString(t *testing.T) {
 	assertStringPtr(t, "Address", place.Address, "123 Main Street, City")
 }
 
+func TestPlaces_Multiple(t *testing.T) {
+	t.Parallel()
+	html := `<html><head><script type="application/ld+json">
+	{"@context":"https://schema.org","@graph":[
+		{"@type":"Restaurant","name":"Счастье","address":"ул. Рубинштейна, 15"},
+		{"@type":"Restaurant","name":"Frank","address":"ул. Рубинштейна, 29"}
+	]}</script></head></html>`
+
+	data, err := Parse(strings.NewReader(html), "text/html", "https://example.com")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	places := data.Places()
+	if len(places) != 2 {
+		t.Fatalf("expected 2 places, got %d", len(places))
+	}
+	if places[0].Name == nil || *places[0].Name != "Счастье" {
+		t.Errorf("expected Счастье, got %v", places[0].Name)
+	}
+	if places[1].Name == nil || *places[1].Name != "Frank" {
+		t.Errorf("expected Frank, got %v", places[1].Name)
+	}
+}
+
+func TestPlaces_Empty(t *testing.T) {
+	t.Parallel()
+	html := `<html><head></head><body>no structured data</body></html>`
+	data, err := Parse(strings.NewReader(html), "text/html", "https://example.com")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	places := data.Places()
+	if len(places) != 0 {
+		t.Errorf("expected 0 places, got %d", len(places))
+	}
+}
+
 func assertStringPtr(t *testing.T, field string, got *string, want string) {
 	t.Helper()
 	if got == nil {

@@ -52,6 +52,7 @@ func aggregateResults(results []searchResult, maxResults int) *SearchResult {
 	var (
 		contextParts []string
 		sources      []string
+		entries      []SearchEntry
 		seen         = make(map[string]bool)
 	)
 
@@ -67,6 +68,11 @@ func aggregateResults(results []searchResult, maxResults int) *SearchResult {
 		seen[norm] = true
 
 		sources = append(sources, r.URL)
+		entries = append(entries, SearchEntry{
+			URL:     r.URL,
+			Title:   r.Title,
+			Snippet: r.Content,
+		})
 		switch {
 		case r.Title != "" && r.Content != "":
 			contextParts = append(contextParts, r.Title+": "+r.Content)
@@ -80,5 +86,6 @@ func aggregateResults(results []searchResult, maxResults int) *SearchResult {
 	return &SearchResult{
 		Context: strings.Join(contextParts, "\n\n"),
 		Sources: sources,
+		Entries: entries,
 	}
 }

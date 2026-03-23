@@ -59,6 +59,7 @@ func (p *Parallel) merge(results []providerResult) (*SearchResult, error) {
 	var (
 		contextParts []string
 		sources      []string
+		entries      []SearchEntry
 		seen         = make(map[string]bool)
 		errs         []error
 	)
@@ -74,11 +75,14 @@ func (p *Parallel) merge(results []providerResult) (*SearchResult, error) {
 		if pr.result.Context != "" {
 			contextParts = append(contextParts, pr.result.Context)
 		}
-		for _, src := range pr.result.Sources {
+		for i, src := range pr.result.Sources {
 			norm := normalizeURL(src)
 			if norm != "" && !seen[norm] {
 				seen[norm] = true
 				sources = append(sources, src)
+				if i < len(pr.result.Entries) {
+					entries = append(entries, pr.result.Entries[i])
+				}
 			}
 		}
 	}
@@ -90,5 +94,6 @@ func (p *Parallel) merge(results []providerResult) (*SearchResult, error) {
 	return &SearchResult{
 		Context: strings.Join(contextParts, "\n\n"),
 		Sources: sources,
+		Entries: entries,
 	}, nil
 }
