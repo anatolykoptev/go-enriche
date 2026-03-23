@@ -36,6 +36,7 @@ type ReadabilityResult struct {
 	Content   string            `json:"content"`
 	Author    string            `json:"author"`
 	Excerpt   string            `json:"excerpt"`
+	OGImage   string            `json:"og_image,omitempty"`
 	Length    int               `json:"length"`
 	ElapsedMs int               `json:"elapsed_ms"`
 	JsonLD    []json.RawMessage `json:"json_ld,omitempty"`
