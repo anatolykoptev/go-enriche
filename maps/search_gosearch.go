@@ -31,7 +31,7 @@ func GoSearchSearch(goSearchURL string) SearchFunc {
 	client := &http.Client{Timeout: goSearchTimeout}
 
 	return func(ctx context.Context, query string) ([]SearchResult, error) {
-		reqURL := baseURL + "/api/search?q=" + url.QueryEscape(query) + "&lang=ru"
+		reqURL := baseURL + "/api/search?q=" + url.QueryEscape(query) + "&lang=ru&engine=yandex"
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 		if err != nil {
