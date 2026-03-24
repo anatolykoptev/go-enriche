@@ -1,6 +1,7 @@
 package maps
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -36,7 +37,7 @@ func ByparrSearch(byparrURL string) SearchFunc {
 
 	return func(ctx context.Context, query string) ([]SearchResult, error) {
 		searchQuery := cleanMapsQuery(query)
-		mapsURL := "https://yandex.ru/maps/2/saint-petersburg/search/" +
+		mapsURL := "https://yandex.ru/maps/search/" +
 			url.PathEscape(searchQuery) + "/"
 
 		br, err := callByparr(ctx, client, base, mapsURL)
@@ -59,7 +60,7 @@ func callByparr(ctx context.Context, client *http.Client, base, targetURL string
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		base+"/v1", strings.NewReader(string(body)))
+		base+"/v1", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("byparr search: request: %w", err)
 	}
@@ -71,7 +72,7 @@ func callByparr(ctx context.Context, client *http.Client, base, targetURL string
 	}
 	defer resp.Body.Close()
 
-	data, err := io.ReadAll(io.LimitReader(resp.Body, oxMaxResponseBytes))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
 		return nil, fmt.Errorf("byparr search: read: %w", err)
 	}
