@@ -17,13 +17,24 @@ const (
 	maxOrgResults      = 3
 )
 
+// SearchResult is a single web search result (URL + Title).
+type SearchResult struct {
+	URL   string
+	Title string
+}
+
+// SearchFunc searches the web and returns results. Used as a pluggable
+// alternative to SearXNG for finding Yandex Maps org links.
+type SearchFunc func(ctx context.Context, query string) ([]SearchResult, error)
+
 // YandexMaps checks place status by:
-//  1. Searching SearXNG for Yandex Maps org links.
+//  1. Searching for Yandex Maps org links (via SearXNG or SearchFunc).
 //  2. Fetching the org page and parsing the embedded JSON status.
 //
 // When an OrgFetcher is set, uses it to render SPA pages and extract full business data.
 type YandexMaps struct {
 	searxngURL string
+	searchFunc SearchFunc
 	httpClient *http.Client
 	orgFetcher OrgFetcher
 }
@@ -42,12 +53,15 @@ func WithOrgFetcher(f OrgFetcher) YandexOption {
 	return func(y *YandexMaps) { y.orgFetcher = f }
 }
 
+// WithSearchFunc sets a custom search function instead of SearXNG.
+// When set, searxngURL is not required.
+func WithSearchFunc(f SearchFunc) YandexOption {
+	return func(y *YandexMaps) { y.searchFunc = f }
+}
+
 // NewYandexMaps creates a Yandex Maps checker.
-// searxngURL is the base URL of the SearXNG instance (e.g., "http://searxng:8080").
+// Either searxngURL or WithSearchFunc option must be provided.
 func NewYandexMaps(searxngURL string, opts ...YandexOption) (*YandexMaps, error) {
-	if searxngURL == "" {
-		return nil, errors.New("yandex: searxng URL is required")
-	}
 	y := &YandexMaps{
 		searxngURL: strings.TrimRight(searxngURL, "/"),
 		httpClient: &http.Client{
@@ -63,10 +77,13 @@ func NewYandexMaps(searxngURL string, opts ...YandexOption) (*YandexMaps, error)
 	for _, o := range opts {
 		o(y)
 	}
+	if y.searxngURL == "" && y.searchFunc == nil {
+		return nil, errors.New("yandex: either searxng URL or search func is required")
+	}
 	return y, nil
 }
 
-// Check queries SearXNG for Yandex Maps org listings, then fetches each org page
+// Check queries for Yandex Maps org listings, then fetches each org page
 // to read the embedded status JSON ("permanent-closed", "temporary-closed", "open").
 func (y *YandexMaps) Check(ctx context.Context, name, city string) (*CheckResult, error) {
 	if err := ctx.Err(); err != nil {
@@ -83,7 +100,7 @@ func (y *YandexMaps) Check(ctx context.Context, name, city string) (*CheckResult
 
 	// Check each org page for status (and business data if browser available).
 	// Prefer open/temporary-closed branches over permanently closed ones,
-	// since SearXNG may rank a closed branch higher than the active one.
+	// since search may rank a closed branch higher than the active one.
 	var closedResult *CheckResult
 	for _, orgURL := range orgURLs {
 		result, err := y.fetchAndParse(ctx, orgURL)
@@ -110,9 +127,33 @@ type searxngResult struct {
 	Title string `json:"title"`
 }
 
-// findOrgURLs searches SearXNG for Yandex Maps org links.
+// findOrgURLs searches for Yandex Maps org links using SearchFunc or SearXNG.
 func (y *YandexMaps) findOrgURLs(ctx context.Context, name, city string) ([]string, error) {
 	query := fmt.Sprintf(`site:yandex.ru/maps/org "%s" %s`, name, city)
+
+	if y.searchFunc != nil {
+		return y.findOrgURLsViaFunc(ctx, query)
+	}
+	return y.findOrgURLsViaSearXNG(ctx, query)
+}
+
+// findOrgURLsViaFunc uses the pluggable SearchFunc.
+func (y *YandexMaps) findOrgURLsViaFunc(ctx context.Context, query string) ([]string, error) {
+	results, err := y.searchFunc(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	var urls []string
+	for _, r := range results {
+		if isYandexMapsOrgURL(r.URL) && len(urls) < maxOrgResults {
+			urls = append(urls, r.URL)
+		}
+	}
+	return urls, nil
+}
+
+// findOrgURLsViaSearXNG searches SearXNG JSON API (legacy path).
+func (y *YandexMaps) findOrgURLsViaSearXNG(ctx context.Context, query string) ([]string, error) {
 	params := url.Values{}
 	params.Set("q", query)
 	params.Set("format", "json")
@@ -197,7 +238,7 @@ func (y *YandexMaps) fetchOrgStatus(ctx context.Context, orgURL string) (string,
 		"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 	req.Header.Set("Accept-Language", "ru-RU,ru;q=0.9")
 
-	resp, err := y.httpClient.Do(req) //nolint:gosec // org URLs from SearXNG, not user input
+	resp, err := y.httpClient.Do(req) //nolint:gosec // org URLs from search, not user input
 	if err != nil {
 		return "", err
 	}
