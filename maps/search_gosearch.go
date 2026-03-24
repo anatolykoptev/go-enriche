@@ -48,7 +48,7 @@ func GoSearchSearch(goSearchURL string) SearchFunc {
 			return nil, fmt.Errorf("go-search: HTTP %d", resp.StatusCode)
 		}
 
-		data, err := io.ReadAll(io.LimitReader(resp.Body, oxMaxResponseBytes))
+		data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 		if err != nil {
 			return nil, fmt.Errorf("go-search: read: %w", err)
 		}
