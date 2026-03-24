@@ -90,6 +90,22 @@ func callByparr(ctx context.Context, client *http.Client, base, targetURL string
 	return &br, nil
 }
 
+// ByparrOrgFetcher returns an OrgFetcher that renders Yandex Maps org pages
+// via byparr headless browser. Required because org pages are SPA —
+// plain HTTP GET returns empty skeleton without status data.
+func ByparrOrgFetcher(byparrURL string) OrgFetcher {
+	base := strings.TrimRight(byparrURL, "/")
+	client := &http.Client{Timeout: byparrSearchTimeout}
+
+	return func(ctx context.Context, orgURL string) (string, error) {
+		br, err := callByparr(ctx, client, base, orgURL)
+		if err != nil {
+			return "", err
+		}
+		return br.Solution.Response, nil
+	}
+}
+
 // extractByparrResults extracts org URLs from byparr solution (redirect URL + HTML).
 func extractByparrResults(br *byparrResponse) []SearchResult {
 	var results []SearchResult
