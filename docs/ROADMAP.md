@@ -158,3 +158,29 @@ Extracted from go-wp's monolithic `tool_enrich.go`. Three consumers: go-wp, go-n
 - JavaScript rendering via go-rod (optional Fetcher)
 - Sitemap-based batch enrichment
 - Webhook/callback for async enrichment pipelines
+
+---
+
+## Content Automation Track (NEW, 2026-04-23)
+
+Cross-cutting from [~/docs/content-automation/ROADMAP.md](/home/krolik/docs/content-automation/ROADMAP.md).
+
+**Context**: web search сегодня дублируется трижды — go-search (MCP + direct DDG/Startpage scrapers), go-enriche (library with `search/` package, same DDG/Startpage/Brave/OxBrowser), and ox-browser `/images/search`. Bugfixes нужны 2-3 раза.
+
+### Phase 4 — Search consolidation decision (2 weeks)
+
+**Chosen path (per content track master)**: **Path A — go-enriche becomes the main search engine.**
+
+Rationale: go-enriche already has CircuitBreaker + RateLimit + Parallel + Fallback + SiteHint + 5 providers. Enrichment hot path is more latency-critical than keeping go-search autonomous.
+
+- [ ] Bump version (e.g. v1.4.0) signalling go-enriche is the canonical search provider
+- [ ] Document `search.Parallel` / `search.Fallback` as the stable API for consumers
+- [ ] Ensure library import cost is acceptable for go-search (minimal transitive deps)
+- [ ] Fix 1 known vuln dep (see `go list -m -u all` + `govulncheck`)
+- [ ] README section "Consumers" — list go-wp, go-nerv, vaelor, go-search (as of Phase 4)
+
+### Counter-task for go-search
+
+- [ ] go-search imports go-enriche as library, deletes own `internal/engine/direct_{ddg,startpage,brave}.go` (~800 LOC)
+- [ ] go-search keeps `youtube_transcript`, `hn_search`, `github_code_search`, `hf_*` — unique to that service
+- See [~/docs/content-automation/phases/phase-4-imagen-consolidation.md](/home/krolik/docs/content-automation/phases/phase-4-imagen-consolidation.md) task 4.3 for full details
