@@ -2,6 +2,7 @@ package maps
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 )
@@ -11,6 +12,22 @@ const (
 	resilientMaxSuspend  = 10 * time.Minute
 	resilientMaxExpShift = 8
 )
+
+// ErrSuspended is returned by Resilient.Check when the circuit breaker is open.
+// CompositeChecker treats any non-nil error as a transient backend failure:
+// it logs the error and continues to the next backend. Returning ErrSuspended
+// (rather than a synthetic PlaceNotFound result) preserves that log entry
+// and increments the mapsCheckError metric in enriche.go.
+//
+// Wrap each backend individually inside CompositeChecker:
+//
+//	NewResilient(NewTwoGIS(...), timeout)     // good -- per-backend breaker
+//	NewResilient(NewCompositeChecker(...), t) // bad  -- one breaker hides which backend failed
+var ErrSuspended = errors.New("maps: backend suspended (circuit breaker open)")
+
+// errNilResult is returned when the inner Checker returns (nil, nil),
+// which violates the Checker contract. Treated as a backend failure.
+var errNilResult = errors.New("maps: inner checker returned nil result and nil error")
 
 // circuitBreaker tracks consecutive errors and temporarily suspends a backend.
 // After each error the suspend duration doubles (exponential backoff, capped at 10m).
@@ -53,14 +70,19 @@ func (cb *circuitBreaker) recordSuccess() {
 }
 
 // Resilient wraps a Checker with:
-//   - a per-call timeout (context.WithTimeout) so a slow backend can't eat the entire budget.
+//   - a per-call timeout (context.WithTimeout) so a slow backend cannot eat the entire budget.
 //   - a circuit breaker that suspends the backend after consecutive errors.
 //
-// When suspended or on timeout/error, Resilient returns PlaceNotFound+nil so
-// CompositeChecker continues to the next backend rather than aborting the chain.
+// On breaker-open, timeout, or inner error, Resilient returns (nil, err) so
+// CompositeChecker logs the failure and continues to the next backend.
+// This preserves error visibility: the slog.Debug in composite.go fires, and
+// enriche.go increments mapsCheckError via the err != nil gate.
 //
-// PlaceNotFound from a healthy inner call is treated as SUCCESS (backend is up,
-// place simply not found there); the circuit breaker is NOT tripped.
+// A genuine PlaceNotFound from a HEALTHY inner call is treated as SUCCESS --
+// the backend is up, the place simply is not there -- and is returned as
+// (*CheckResult{Status: PlaceNotFound}, nil) without tripping the breaker.
+//
+// Wrap each backend individually (see ErrSuspended doc).
 type Resilient struct {
 	inner   Checker
 	timeout time.Duration
@@ -69,6 +91,7 @@ type Resilient struct {
 
 // NewResilient wraps a Checker with circuit-breaker and per-call timeout.
 // timeout is applied per Check call; 0 means no extra timeout (context deadline governs).
+// Wrap each backend individually inside CompositeChecker -- see ErrSuspended.
 func NewResilient(inner Checker, timeout time.Duration) *Resilient {
 	return &Resilient{
 		inner:   inner,
@@ -78,11 +101,15 @@ func NewResilient(inner Checker, timeout time.Duration) *Resilient {
 }
 
 // Check delegates to the inner Checker unless the circuit breaker is open.
-// On breaker-open, timeout, or error: returns PlaceNotFound+nil (fall-through for CompositeChecker).
-// On success (any status including PlaceNotFound): records success, returns result as-is.
+//
+// Return contract:
+//   - breaker open:          (nil, ErrSuspended)
+//   - inner returns error:   (nil, err) -- parent-ctx cancel is NOT recorded as backend failure
+//   - inner returns nil,nil: (nil, errNilResult) -- contract violation, treated as failure
+//   - inner returns result:  (result, nil) -- including PlaceNotFound (healthy response)
 func (r *Resilient) Check(ctx context.Context, name, city string) (*CheckResult, error) {
 	if r.cb.isSuspended() {
-		return &CheckResult{Status: PlaceNotFound}, nil
+		return nil, ErrSuspended
 	}
 
 	callCtx := ctx
@@ -94,13 +121,17 @@ func (r *Resilient) Check(ctx context.Context, name, city string) (*CheckResult,
 
 	result, err := r.inner.Check(callCtx, name, city)
 	if err != nil {
-		r.cb.recordError()
-		return &CheckResult{Status: PlaceNotFound}, nil
+		// Do NOT charge this against the breaker if the CALLER's context is already
+		// done -- a parent cancellation or deadline is not the backend's fault.
+		if ctx.Err() == nil {
+			r.cb.recordError()
+		}
+		return nil, err
 	}
 	if result == nil {
 		// Guard against a misbehaving inner that returns (nil, nil).
 		r.cb.recordError()
-		return &CheckResult{Status: PlaceNotFound}, nil
+		return nil, errNilResult
 	}
 
 	r.cb.recordSuccess()
