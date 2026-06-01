@@ -80,12 +80,6 @@ func WithMapsChecker(c maps.Checker) Option {
 	return func(e *Enricher) { e.mapsChecker = c }
 }
 
-// WithGeocoder sets a maps.Geocoder for automatic address→coordinates resolution.
-// Only effective for ModePlaces items with a non-nil Facts.Address and nil Latitude.
-func WithGeocoder(g *maps.Geocoder) Option {
-	return func(e *Enricher) { e.geocoder = g }
-}
-
 // WithBrowserFetch sets a headless browser fallback for JS-heavy pages.
 // When content extracted via HTTP fetch is thin (< 200 chars), the browser
 // function re-renders the page and extraction is retried on the rendered HTML.
