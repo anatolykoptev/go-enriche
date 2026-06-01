@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/anatolykoptev/go-stealth/websearch"
+	"github.com/anatolykoptev/go-engine/websearch"
 )
 
 const (

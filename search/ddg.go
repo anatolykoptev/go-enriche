@@ -8,8 +8,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/anatolykoptev/go-engine/websearch"
 	stealth "github.com/anatolykoptev/go-stealth"
-	"github.com/anatolykoptev/go-stealth/websearch"
 )
 
 // DDG implements Provider using DuckDuckGo HTML lite endpoint with browser TLS fingerprinting.
@@ -105,7 +105,7 @@ func (d *DDG) Search(ctx context.Context, query string, timeRange string) (*Sear
 		return nil, fmt.Errorf("ddg: HTTP %d", status)
 	}
 
-	// Delegate HTML parsing to go-stealth websearch.
+	// Delegate HTML parsing to go-engine websearch.
 	wsResults, err := websearch.ParseDDGHTML(data)
 	if err != nil {
 		return nil, fmt.Errorf("ddg: parse: %w", err)
