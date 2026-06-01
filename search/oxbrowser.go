@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anatolykoptev/go-stealth/websearch"
+	"github.com/anatolykoptev/go-engine/websearch"
 )
 
 const oxBrowserSearchTimeout = 30 * time.Second
@@ -95,7 +95,7 @@ func (o *OxBrowser) Search(ctx context.Context, query string, _ string) (*Search
 		return nil, fmt.Errorf("oxbrowser search: upstream HTTP %d", fr.Status)
 	}
 
-	// Parse DDG HTML using go-stealth websearch parser.
+	// Parse DDG HTML using go-engine websearch parser.
 	wsResults, err := websearch.ParseDDGHTML([]byte(fr.Body))
 	if err != nil {
 		return nil, fmt.Errorf("oxbrowser search: parse DDG HTML: %w", err)

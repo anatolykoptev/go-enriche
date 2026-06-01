@@ -8,8 +8,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/anatolykoptev/go-engine/websearch"
 	stealth "github.com/anatolykoptev/go-stealth"
-	"github.com/anatolykoptev/go-stealth/websearch"
 )
 
 // Startpage implements Provider using Startpage POST form with browser TLS fingerprinting.
@@ -106,7 +106,7 @@ func (sp *Startpage) Search(ctx context.Context, query string, timeRange string)
 		return nil, fmt.Errorf("startpage: HTTP %d", status)
 	}
 
-	// Delegate HTML parsing to go-stealth websearch.
+	// Delegate HTML parsing to go-engine websearch.
 	wsResults, err := websearch.ParseStartpageHTML(data)
 	if err != nil {
 		return nil, fmt.Errorf("startpage: parse: %w", err)

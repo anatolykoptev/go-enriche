@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anatolykoptev/go-stealth/websearch"
+	"github.com/anatolykoptev/go-engine/websearch"
 )
 
 const oxSearchTimeout = 20 * time.Second
