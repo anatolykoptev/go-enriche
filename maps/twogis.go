@@ -43,6 +43,7 @@ type twoGISItem struct {
 	AddressName string            `json:"address_name"`
 	Schedule    *twoGISSchedule   `json:"schedule"`
 	Contacts    []twoGISContactGr `json:"contact_groups"`
+	Point       *twoGISPoint      `json:"point"`
 }
 
 type twoGISSchedule struct {
@@ -56,6 +57,12 @@ type twoGISContactGr struct {
 type twoGISContact struct {
 	Type  string `json:"type"`
 	Value string `json:"value"`
+}
+
+// twoGISPoint holds the geographic coordinates of an item.
+type twoGISPoint struct {
+	Lat float64 `json:"lat"`
+	Lon float64 `json:"lon"`
 }
 
 // TwoGISChecker verifies place existence via 2GIS Catalog API.
@@ -86,7 +93,7 @@ func (c *TwoGISChecker) Check(ctx context.Context, name, city string) (*CheckRes
 		"q":      {query},
 		"type":   {"branch"},
 		"key":    {c.apiKey},
-		"fields": {"items.schedule,items.contact_groups"},
+		"fields": {"items.schedule,items.contact_groups,items.point"},
 	}
 
 	reqURL := twoGISBaseURL + "?" + params.Encode()
@@ -119,38 +126,47 @@ func (c *TwoGISChecker) Check(ctx context.Context, name, city string) (*CheckRes
 		return &CheckResult{Status: PlaceNotFound}, nil
 	}
 
-	item := gr.Result.Items[0]
-	result := &CheckResult{
+	return buildTwoGISResult(gr.Result.Items[0]), nil
+}
+
+// buildTwoGISResult converts a 2GIS item into a CheckResult with OrgData.
+func buildTwoGISResult(item twoGISItem) *CheckResult {
+	od := &OrgData{
+		Status:  PlaceOpen,
+		Name:    item.Name,
+		Address: item.AddressName,
+	}
+	applyTwoGISContacts(item.Contacts, od)
+	if item.Schedule != nil && item.Schedule.Comment != "" {
+		od.Hours = item.Schedule.Comment
+	}
+	if item.Point != nil {
+		od.Latitude = item.Point.Lat
+		od.Longitude = item.Point.Lon
+	}
+	return &CheckResult{
 		Status:   PlaceOpen,
 		RawTitle: item.Name,
-		OrgData: &OrgData{
-			Status:  PlaceOpen,
-			Name:    item.Name,
-			Address: item.AddressName,
-		},
+		OrgData:  od,
 	}
+}
 
-	// Extract phone and website from contacts.
-	for _, cg := range item.Contacts {
+// applyTwoGISContacts extracts phone and website from 2GIS contact groups.
+func applyTwoGISContacts(groups []twoGISContactGr, od *OrgData) {
+	for _, cg := range groups {
 		for _, ct := range cg.Contacts {
 			switch ct.Type {
 			case "phone":
-				if result.OrgData.Phone == "" {
-					result.OrgData.Phone = ct.Value
+				if od.Phone == "" {
+					od.Phone = ct.Value
 				}
 			case "website":
-				if result.OrgData.Website == "" {
-					result.OrgData.Website = cleanTwoGISURL(ct.Value)
+				if od.Website == "" {
+					od.Website = cleanTwoGISURL(ct.Value)
 				}
 			}
 		}
 	}
-
-	if item.Schedule != nil && item.Schedule.Comment != "" {
-		result.OrgData.Hours = item.Schedule.Comment
-	}
-
-	return result, nil
 }
 
 // cleanTwoGISURL extracts the real URL from a 2GIS redirect link.
