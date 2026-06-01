@@ -151,6 +151,12 @@ func (e *Enricher) checkMapsStatus(ctx context.Context, item Item, result *Resul
 		return false
 	}
 
+	// Seed source-provided coordinates before merging maps data so the
+	// fill-nil-only guard in mergeOrgDataToFacts preserves them.
+	// Source coords (e.g. from KudaGo) are authoritative; maps-lookup coords
+	// are a fallback used only when no better source is available.
+	seedSourceCoords(item, &result.Facts)
+
 	// Merge business data from maps (fill-nil-only).
 	if cr.OrgData != nil {
 		mergeOrgDataToFacts(cr.OrgData, &result.Facts)
@@ -178,6 +184,20 @@ func mergeOrgDataToFacts(od *maps.OrgData, facts *Facts) {
 		facts.Latitude = &od.Latitude
 		facts.Longitude = &od.Longitude
 	}
+}
+
+// seedSourceCoords writes item.Latitude/Longitude into facts when the item
+// carries a pair of source-authoritative coordinates (both non-nil).
+// Source coords take precedence over maps-lookup coords: this must be called
+// before mergeOrgDataToFacts so the fill-nil-only guard there preserves them.
+// It must also be re-called after extract.ExtractFacts (which overwrites Facts
+// wholesale) — see enriche_fetch.go.
+func seedSourceCoords(item Item, facts *Facts) {
+	if item.Latitude == nil || item.Longitude == nil {
+		return // absent or incomplete pair — treat as not provided
+	}
+	facts.Latitude = item.Latitude
+	facts.Longitude = item.Longitude
 }
 
 // setFactIfNil sets *dst to &src if *dst is nil and src is non-empty.

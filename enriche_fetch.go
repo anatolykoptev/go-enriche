@@ -112,8 +112,13 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 		}
 	}
 
-	// Extract structured facts.
+	// Extract structured facts (wholesale struct assignment — overwrites Facts).
 	result.Facts = extract.ExtractFacts(html, item.URL)
+
+	// Re-seed source-provided coordinates after the wholesale Facts assignment
+	// above. Source coords (e.g. from KudaGo) are authoritative and must win
+	// over anything ExtractFacts resolves from page markup.
+	seedSourceCoords(item, &result.Facts)
 
 	// OG image fallback.
 	if result.Image == nil {

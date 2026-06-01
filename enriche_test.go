@@ -13,6 +13,7 @@ import (
 
 	"github.com/anatolykoptev/go-enriche/cache"
 	"github.com/anatolykoptev/go-enriche/fetch"
+	"github.com/anatolykoptev/go-enriche/maps"
 	"github.com/anatolykoptev/go-enriche/search"
 )
 
@@ -465,5 +466,159 @@ func TestCacheKey(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("cacheKey(%+v) = %q, want %q", tt.item, got, tt.want)
 		}
+	}
+}
+
+// --- Source coords seeding tests ---
+
+// mockMapsChecker is a maps.Checker stub returning configurable OrgData coords.
+type mockMapsChecker struct {
+	lat float64
+	lon float64
+}
+
+func (m *mockMapsChecker) Check(_ context.Context, _, _ string) (*maps.CheckResult, error) {
+	return &maps.CheckResult{
+		Status: maps.PlaceOpen,
+		OrgData: &maps.OrgData{
+			Name:      "Some Place",
+			Latitude:  m.lat,
+			Longitude: m.lon,
+		},
+	}, nil
+}
+
+// TestEnrich_SourceCoords_WinsOverMapsChecker_NoURL covers the no-URL path
+// (no fetchAndExtract, no ExtractFacts wholesale assignment).
+// Source coords must survive mergeOrgDataToFacts fill-nil-only guard.
+func TestEnrich_SourceCoords_WinsOverMapsChecker_NoURL(t *testing.T) {
+	t.Parallel()
+
+	srcLat, srcLon := 59.9390, 30.3158 // source-authoritative (e.g. KudaGo)
+	mapsLat, mapsLon := 55.7558, 37.6176 // maps-checker returns Moscow coords
+
+	checker := &mockMapsChecker{lat: mapsLat, lon: mapsLon}
+	e := New(WithMapsChecker(checker))
+
+	result, err := e.Enrich(context.Background(), Item{
+		Name:      "Кафе Singer",
+		City:      "Санкт-Петербург",
+		Mode:      ModePlaces,
+		Latitude:  &srcLat,
+		Longitude: &srcLon,
+	})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+	if result.Facts.Latitude == nil {
+		t.Fatal("expected Facts.Latitude to be set")
+	}
+	if *result.Facts.Latitude != srcLat {
+		t.Errorf("Latitude = %v, want source %v (maps checker returned %v)",
+			*result.Facts.Latitude, srcLat, mapsLat)
+	}
+	if result.Facts.Longitude == nil {
+		t.Fatal("expected Facts.Longitude to be set")
+	}
+	if *result.Facts.Longitude != srcLon {
+		t.Errorf("Longitude = %v, want source %v (maps checker returned %v)",
+			*result.Facts.Longitude, srcLon, mapsLon)
+	}
+}
+
+// TestEnrich_SourceCoords_WinsOverMapsChecker_WithURL covers the URL path where
+// fetchAndExtract runs and extract.ExtractFacts overwrites Facts wholesale.
+// Source coords must survive the wholesale assignment and win over the maps checker.
+func TestEnrich_SourceCoords_WinsOverMapsChecker_WithURL(t *testing.T) {
+	t.Parallel()
+
+	srcLat, srcLon := 59.9390, 30.3158 // source-authoritative
+	mapsLat, mapsLon := 55.7558, 37.6176 // maps-checker would return these
+
+	srv := newTestServer(testHTML, http.StatusOK)
+	defer srv.Close()
+
+	checker := &mockMapsChecker{lat: mapsLat, lon: mapsLon}
+	e := New(WithMapsChecker(checker))
+
+	result, err := e.Enrich(context.Background(), Item{
+		Name:      "Кафе Singer",
+		URL:       srv.URL,
+		City:      "Санкт-Петербург",
+		Mode:      ModePlaces,
+		Latitude:  &srcLat,
+		Longitude: &srcLon,
+	})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+	if result.Facts.Latitude == nil {
+		t.Fatal("expected Facts.Latitude to be set after fetchAndExtract path")
+	}
+	if *result.Facts.Latitude != srcLat {
+		t.Errorf("Latitude = %v, want source %v (maps checker returned %v, ExtractFacts may have clobbered)",
+			*result.Facts.Latitude, srcLat, mapsLat)
+	}
+	if result.Facts.Longitude == nil {
+		t.Fatal("expected Facts.Longitude to be set after fetchAndExtract path")
+	}
+	if *result.Facts.Longitude != srcLon {
+		t.Errorf("Longitude = %v, want source %v", *result.Facts.Longitude, srcLon)
+	}
+}
+
+// TestEnrich_NoSourceCoords_MapsCheckerFills verifies that when Item carries no
+// coords the maps checker still fills them (no regression on existing behaviour).
+func TestEnrich_NoSourceCoords_MapsCheckerFills(t *testing.T) {
+	t.Parallel()
+
+	mapsLat, mapsLon := 55.7558, 37.6176
+	checker := &mockMapsChecker{lat: mapsLat, lon: mapsLon}
+	e := New(WithMapsChecker(checker))
+
+	result, err := e.Enrich(context.Background(), Item{
+		Name: "Some Cafe",
+		City: "Москва",
+		Mode: ModePlaces,
+		// Latitude and Longitude deliberately absent (nil)
+	})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+	if result.Facts.Latitude == nil {
+		t.Fatal("expected Facts.Latitude from maps checker when item has no coords")
+	}
+	if *result.Facts.Latitude != mapsLat {
+		t.Errorf("Latitude = %v, want maps %v", *result.Facts.Latitude, mapsLat)
+	}
+}
+
+// TestEnrich_SourceCoords_PairGuard verifies that a lone Latitude with nil Longitude
+// is treated as absent (not seeded), so it doesn't produce a half-coord in Facts.
+func TestEnrich_SourceCoords_PairGuard(t *testing.T) {
+	t.Parallel()
+
+	srcLat := 59.9390
+	mapsLat, mapsLon := 55.7558, 37.6176
+	checker := &mockMapsChecker{lat: mapsLat, lon: mapsLon}
+	e := New(WithMapsChecker(checker))
+
+	result, err := e.Enrich(context.Background(), Item{
+		Name:      "Half Coord Place",
+		City:      "Санкт-Петербург",
+		Mode:      ModePlaces,
+		Latitude:  &srcLat, // only lat, lon is nil
+		Longitude: nil,
+	})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+	// Pair guard must treat this as absent → maps checker fills instead.
+	if result.Facts.Latitude == nil {
+		t.Fatal("expected Facts.Latitude to be filled by maps checker (pair guard rejected lone lat)")
+	}
+	if *result.Facts.Latitude != mapsLat {
+		t.Errorf("Latitude = %v, want maps %v (lone lat should be ignored, maps should fill)",
+			*result.Facts.Latitude, mapsLat)
 	}
 }
