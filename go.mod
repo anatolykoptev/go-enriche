@@ -6,9 +6,9 @@ require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.0
 	github.com/PuerkitoBio/goquery v1.11.0
 	github.com/alicebob/miniredis/v2 v2.38.0
-	github.com/anatolykoptev/go-engine v1.24.0
+	github.com/anatolykoptev/go-engine v1.27.0
 	github.com/anatolykoptev/go-imagefy v0.1.1
-	github.com/anatolykoptev/go-stealth v1.13.0
+	github.com/anatolykoptev/go-stealth v1.15.0
 	github.com/astappiev/microdata v1.0.2
 	github.com/markusmobius/go-trafilatura v1.12.2
 	github.com/redis/go-redis/v9 v9.18.0
