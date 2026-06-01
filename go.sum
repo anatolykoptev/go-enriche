@@ -8,12 +8,12 @@ github.com/RadhiFadlillah/whatlanggo v0.0.0-20240916001553-aac1f0f737fc h1:6aA31
 github.com/RadhiFadlillah/whatlanggo v0.0.0-20240916001553-aac1f0f737fc/go.mod h1:PgrPWaMBxL1lyq1k5DEMqC0Y67R3pG1vEsHzxFXeDxc=
 github.com/alicebob/miniredis/v2 v2.38.0 h1:nZAzCR+Lj+Vxk4ZXzm2NuKq2O33RXj1XxJ2e2uP9jiw=
 github.com/alicebob/miniredis/v2 v2.38.0/go.mod h1:TcL7YfarKPGDAthEtl5NBeHZfeUQj6OXMm/+iu5cLMM=
-github.com/anatolykoptev/go-engine v1.24.0 h1:KI90vw6ePwv0vJSZVko70qmyfzsrhsBmhMyv+WklEzo=
-github.com/anatolykoptev/go-engine v1.24.0/go.mod h1:gWG9AaOcMN4UylxJHdjePSMGs5E1W6IkkRfUwuCvthk=
+github.com/anatolykoptev/go-engine v1.27.0 h1:Jv2dsn2Evrfpxi1fwGCIVKD85Uo+ASqt1y0JHeg38ak=
+github.com/anatolykoptev/go-engine v1.27.0/go.mod h1:kP9sGWnphDG77juLR27HReHTRd5qfxp0R5UiJ91J0rE=
 github.com/anatolykoptev/go-imagefy v0.1.1 h1:003FpJy8SXeTJNCfnvYuA+QOacP8bsxn2h5gTKquJE0=
 github.com/anatolykoptev/go-imagefy v0.1.1/go.mod h1:s+V/fuhF+bpbsGXLeYdWEtQR/rijhSqeFxXAQHWIo+M=
-github.com/anatolykoptev/go-stealth v1.13.0 h1:NslhTU1Zu1k6y5+//ncOUbqkVCJ/wUrSTVdl6ieRz3U=
-github.com/anatolykoptev/go-stealth v1.13.0/go.mod h1:QQhjS2aB429MIELeoqmyN5pHppnfLDafwEZ9cjbrEkU=
+github.com/anatolykoptev/go-stealth v1.15.0 h1:xdTEijmCrhahwQJAXNyxHeLwWQQessOrNxEyyh4dA2U=
+github.com/anatolykoptev/go-stealth v1.15.0/go.mod h1:1Fevj8WfJDJ9h/t4Bl8MtHbuQ92ZPjIm8SR6/vnwJsQ=
 github.com/andybalholm/brotli v1.2.0 h1:ukwgCxwYrmACq68yiUqwIWnGY0cTPox/M94sVwToPjQ=
 github.com/andybalholm/brotli v1.2.0/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/andybalholm/cascadia v1.3.3 h1:AG2YHrzJIm4BZ19iwJ/DAua6Btl3IwJX+VI4kktS1LM=
@@ -68,8 +68,8 @@ github.com/jalaali/go-jalaali v0.0.0-20210801064154-80525e88d958 h1:qxLoi6CAcXVz
 github.com/jalaali/go-jalaali v0.0.0-20210801064154-80525e88d958/go.mod h1:Wqfu7mjUHj9WDzSSPI5KfBclTTEnLveRUFr/ujWnTgE=
 github.com/klauspost/compress v1.18.4 h1:RPhnKRAQ4Fh8zU2FY/6ZFDwTVTxgJ/EMydqSTzE9a2c=
 github.com/klauspost/compress v1.18.4/go.mod h1:R0h/fSBs8DE4ENlcrlib3PsXS61voFxhIs2DeRhCvJ4=
-github.com/klauspost/cpuid/v2 v2.3.0 h1:S4CRMLnYUhGeDFDqkGriYKdfoFlDnMtqTiI/sFzhA9Y=
-github.com/klauspost/cpuid/v2 v2.3.0/go.mod h1:hqwkgyIinND0mEev00jJYCxPNVRVXFQeu1XKlok6oO0=
+github.com/klauspost/cpuid/v2 v2.0.9 h1:lgaqFMSdTdQYdZ04uHyN2d/eKdOMyi2YLSvlQIBFYa4=
+github.com/klauspost/cpuid/v2 v2.0.9/go.mod h1:FInQzS24/EEf25PyTYn52gqo7WaD8xa0213Md/qVLRg=
 github.com/markusmobius/go-dateparser v1.2.4 h1:2e8XJozaERVxGwsRg72coi51L2aiYqE2gukkdLc85ck=
 github.com/markusmobius/go-dateparser v1.2.4/go.mod h1:CBAUADJuMNhJpyM6IYaWAoFhtKaqnUcznY2cL7gNugY=
 github.com/markusmobius/go-domdistiller v0.0.0-20240926050704-25b8d046ffb4 h1:+7kfF1+dmSXV469sqjeNC+eKJF7xDuS5mvZA3DFVLLY=
