@@ -115,9 +115,6 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 	// Extract structured facts.
 	result.Facts = extract.ExtractFacts(html, item.URL)
 
-	// Geocode: resolve address to coordinates (places only).
-	e.geocodeIfNeeded(ctx, item, result)
-
 	// OG image fallback.
 	if result.Image == nil {
 		result.Image = extract.ExtractOGImage(fr.HTML)
@@ -239,27 +236,6 @@ func shouldUseGoquery(gqContent string, contentRunes int) bool {
 	hasLinks := strings.Contains(gqContent, markdownLinkMarker)
 	notTooNoisy := contentRunes == 0 || gqRunes/contentRunes <= maxGoqueryRatio
 	return hasLinks && gqRunes >= contentRunes && notTooNoisy
-}
-
-// geocodeIfNeeded resolves address to lat/lon for place items.
-func (e *Enricher) geocodeIfNeeded(ctx context.Context, item Item, result *Result) {
-	if e.geocoder == nil || item.Mode != ModePlaces {
-		return
-	}
-	if result.Facts.Address == nil || result.Facts.Latitude != nil {
-		return
-	}
-
-	city := item.City
-	if city == "" {
-		city = "Санкт-Петербург"
-	}
-
-	lat, lon, ok := e.geocoder.Geocode(ctx, *result.Facts.Address, city)
-	if ok {
-		result.Facts.Latitude = &lat
-		result.Facts.Longitude = &lon
-	}
 }
 
 // fetchWithRetry fetches a URL with one retry on transient errors.
