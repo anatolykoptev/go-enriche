@@ -9,8 +9,10 @@ import (
 	"net/http"
 )
 
-// maxResponseBytes is the size limit for HTTP response bodies (512 KB).
-const maxResponseBytes = 512 * 1024
+// maxResponseBytes is the size limit for HTTP response bodies (4 MB).
+// Yandex Maps org pages render to ~650 KB; the previous 512 KB cap truncated
+// them mid-JSON, so org-data parse failed and lat/lon/rating/hours came back empty.
+const maxResponseBytes = 4 * 1024 * 1024
 
 // oxFetchResponse is the JSON response from ox-browser /fetch endpoint.
 type oxFetchResponse struct {
