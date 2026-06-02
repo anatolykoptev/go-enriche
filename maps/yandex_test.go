@@ -12,7 +12,7 @@ import (
 func TestYandexMaps_PermanentClosed(t *testing.T) {
 	env := newTestEnv(t, `<html>{"status":"permanent-closed","name":"Test"}</html>`)
 
-	r, err := env.checker.Check(context.Background(), "Test Place", "Москва")
+	r, err := env.checker.Check(context.Background(), "Test Place", "Москва", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestYandexMaps_PermanentClosed(t *testing.T) {
 func TestYandexMaps_TemporaryClosed(t *testing.T) {
 	env := newTestEnv(t, `<html>{"status":"temporary-closed","name":"Test"}</html>`)
 
-	r, err := env.checker.Check(context.Background(), "Test Cafe", "СПб")
+	r, err := env.checker.Check(context.Background(), "Test Cafe", "СПб", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestYandexMaps_TemporaryClosed(t *testing.T) {
 func TestYandexMaps_Open(t *testing.T) {
 	env := newTestEnv(t, `<html>{"status":"open","name":"Good"}</html>`)
 
-	r, err := env.checker.Check(context.Background(), "Good Place", "СПб")
+	r, err := env.checker.Check(context.Background(), "Good Place", "СПб", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestYandexMaps_NotFound(t *testing.T) {
 	defer searxng.Close()
 
 	ym, _ := NewYandexMaps(searxng.URL)
-	r, err := ym.Check(context.Background(), "Nonexistent", "Нигде")
+	r, err := ym.Check(context.Background(), "Nonexistent", "Нигде", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestYandexMaps_SkipsClosedBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := ym.Check(context.Background(), "Q-Zar", "СПб")
+	r, err := ym.Check(context.Background(), "Q-Zar", "СПб", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestYandexMaps_SkipsClosedBranch(t *testing.T) {
 func TestYandexMaps_AllBranchesClosed(t *testing.T) {
 	env := newTestEnv(t, `<html>{"status":"permanent-closed","name":"Dead Place"}</html>`)
 
-	r, err := env.checker.Check(context.Background(), "Dead Place", "СПб")
+	r, err := env.checker.Check(context.Background(), "Dead Place", "СПб", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestYandexMaps_WithOrgFetcher(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := ym.Check(context.Background(), "Test Cafe", "СПб")
+	r, err := ym.Check(context.Background(), "Test Cafe", "СПб", "")
 	if err != nil {
 		t.Fatal(err)
 	}
