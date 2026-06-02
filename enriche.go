@@ -82,6 +82,10 @@ func (e *Enricher) Enrich(ctx context.Context, item Item) (*Result, error) {
 		e.metrics.cacheMiss()
 	}
 
+	// Seed source-provided coordinates unconditionally so every path
+	// (events, places with no URL, places with transient 2GIS errors) preserves them.
+	seedSourceCoords(item, &result.Facts)
+
 	// Maps status check (places only) — short-circuit if permanently closed.
 	if e.checkMapsStatus(ctx, item, result) {
 		if e.search != nil {
@@ -151,12 +155,6 @@ func (e *Enricher) checkMapsStatus(ctx context.Context, item Item, result *Resul
 		return false
 	}
 
-	// Seed source-provided coordinates before merging maps data so the
-	// fill-nil-only guard in mergeOrgDataToFacts preserves them.
-	// Source coords (e.g. from KudaGo) are authoritative; maps-lookup coords
-	// are a fallback used only when no better source is available.
-	seedSourceCoords(item, &result.Facts)
-
 	// Merge business data from maps (fill-nil-only).
 	if cr.OrgData != nil {
 		mergeOrgDataToFacts(cr.OrgData, &result.Facts)
@@ -188,10 +186,10 @@ func mergeOrgDataToFacts(od *maps.OrgData, facts *Facts) {
 
 // seedSourceCoords writes item.Latitude/Longitude into facts when the item
 // carries a pair of source-authoritative coordinates (both non-nil).
-// Source coords take precedence over maps-lookup coords: this must be called
-// before mergeOrgDataToFacts so the fill-nil-only guard there preserves them.
-// It must also be re-called after extract.ExtractFacts (which overwrites Facts
-// wholesale) — see enriche_fetch.go.
+// Called unconditionally at the top of Enrich so all paths (events, no-URL
+// places, transient maps errors) preserve source coords.
+// Must also be re-called in fetchAndExtract after extract.ExtractFacts resets
+// Facts to a zero-value struct — see enriche_fetch.go.
 func seedSourceCoords(item Item, facts *Facts) {
 	if item.Latitude == nil || item.Longitude == nil {
 		return // absent or incomplete pair — treat as not provided

@@ -3,6 +3,7 @@ package enriche
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -619,6 +620,115 @@ func TestEnrich_SourceCoords_PairGuard(t *testing.T) {
 	}
 	if *result.Facts.Latitude != mapsLat {
 		t.Errorf("Latitude = %v, want maps %v (lone lat should be ignored, maps should fill)",
+			*result.Facts.Latitude, mapsLat)
+	}
+}
+
+// mockMapsCheckerError is a maps.Checker stub that always returns an error.
+type mockMapsCheckerError struct{}
+
+func (m *mockMapsCheckerError) Check(_ context.Context, _, _ string) (*maps.CheckResult, error) {
+	return nil, errors.New("2GIS transient error")
+}
+
+// TestEnrich_SourceCoords_PlacesNoURL_MapsError covers the regression: Places mode,
+// no URL, maps checker returns a transient error. Before the fix, checkMapsStatus
+// early-returned without seeding, so source coords were silently dropped.
+func TestEnrich_SourceCoords_PlacesNoURL_MapsError(t *testing.T) {
+	t.Parallel()
+
+	srcLat, srcLon := 59.9390, 30.3158
+	checker := &mockMapsCheckerError{}
+	e := New(WithMapsChecker(checker))
+
+	result, err := e.Enrich(context.Background(), Item{
+		Name:      "Кафе на Невском",
+		City:      "Санкт-Петербург",
+		Mode:      ModePlaces,
+		Latitude:  &srcLat,
+		Longitude: &srcLon,
+		// No URL — fetchAndExtract never runs.
+	})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+	if result.Facts.Latitude == nil {
+		t.Fatal("expected Facts.Latitude to be set; maps error must not drop source coords")
+	}
+	if *result.Facts.Latitude != srcLat {
+		t.Errorf("Latitude = %v, want source %v", *result.Facts.Latitude, srcLat)
+	}
+	if result.Facts.Longitude == nil {
+		t.Fatal("expected Facts.Longitude to be set")
+	}
+	if *result.Facts.Longitude != srcLon {
+		t.Errorf("Longitude = %v, want source %v", *result.Facts.Longitude, srcLon)
+	}
+}
+
+// TestEnrich_SourceCoords_EventsNoURL covers ModeEvents items (e.g. KudaGo) that
+// carry source coords but have no URL. checkMapsStatus is skipped for events entirely
+// and fetchAndExtract never runs, so the unconditional up-front seed is the only guard.
+func TestEnrich_SourceCoords_EventsNoURL(t *testing.T) {
+	t.Parallel()
+
+	srcLat, srcLon := 59.9390, 30.3158
+	// maps checker is wired but must not affect events — add it to prove isolation.
+	checker := &mockMapsChecker{lat: 55.7558, lon: 37.6176}
+	e := New(WithMapsChecker(checker))
+
+	result, err := e.Enrich(context.Background(), Item{
+		Name:      "Фестиваль на Дворцовой",
+		City:      "Санкт-Петербург",
+		Mode:      ModeEvents,
+		Latitude:  &srcLat,
+		Longitude: &srcLon,
+		// No URL — events platform (KudaGo) use case.
+	})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+	if result.Facts.Latitude == nil {
+		t.Fatal("expected Facts.Latitude to survive for ModeEvents no-URL item")
+	}
+	if *result.Facts.Latitude != srcLat {
+		t.Errorf("Latitude = %v, want source %v", *result.Facts.Latitude, srcLat)
+	}
+	if result.Facts.Longitude == nil {
+		t.Fatal("expected Facts.Longitude to survive")
+	}
+	if *result.Facts.Longitude != srcLon {
+		t.Errorf("Longitude = %v, want source %v", *result.Facts.Longitude, srcLon)
+	}
+}
+
+// TestEnrich_SourceCoords_PairGuard_LonOnly is the reverse of TestEnrich_SourceCoords_PairGuard:
+// a lone Longitude with nil Latitude must also be treated as absent so it does not
+// produce a half-coord. The maps checker fills instead.
+func TestEnrich_SourceCoords_PairGuard_LonOnly(t *testing.T) {
+	t.Parallel()
+
+	srcLon := 30.3158
+	mapsLat, mapsLon := 55.7558, 37.6176
+	checker := &mockMapsChecker{lat: mapsLat, lon: mapsLon}
+	e := New(WithMapsChecker(checker))
+
+	result, err := e.Enrich(context.Background(), Item{
+		Name:      "Half Coord Place Lon",
+		City:      "Санкт-Петербург",
+		Mode:      ModePlaces,
+		Latitude:  nil, // only lon, lat is nil
+		Longitude: &srcLon,
+	})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+	// Pair guard must treat this as absent → maps checker fills instead.
+	if result.Facts.Latitude == nil {
+		t.Fatal("expected Facts.Latitude to be filled by maps checker (pair guard rejected lone lon)")
+	}
+	if *result.Facts.Latitude != mapsLat {
+		t.Errorf("Latitude = %v, want maps %v (lone lon should be ignored, maps should fill)",
 			*result.Facts.Latitude, mapsLat)
 	}
 }
