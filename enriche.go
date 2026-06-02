@@ -148,7 +148,7 @@ func (e *Enricher) checkMapsStatus(ctx context.Context, item Item, result *Resul
 	if e.mapsChecker == nil || item.Mode != ModePlaces {
 		return false
 	}
-	cr, err := e.mapsChecker.Check(ctx, item.Name, item.City)
+	cr, err := e.mapsChecker.Check(ctx, item.Name, item.City, item.Address)
 	if err != nil {
 		e.logger.DebugContext(ctx, "enriche: maps check failed", "name", item.Name, "err", err)
 		e.metrics.mapsCheckError()

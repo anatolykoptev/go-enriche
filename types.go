@@ -18,12 +18,13 @@ const (
 
 // Item is the input for enrichment.
 type Item struct {
-	Name   string // required
-	URL    string // optional — if empty, search-only enrichment
-	City   string // optional — for places/events
-	Mode   Mode
-	Source string // origin identifier
-	Topic  string // classification tag
+	Name    string // required
+	URL     string // optional — if empty, search-only enrichment
+	City    string // optional — for places/events
+	Address string // optional — known street address (e.g. "Невский проспект, 28"); used to anchor map lookups
+	Mode    Mode
+	Source  string // origin identifier
+	Topic   string // classification tag
 
 	// Latitude and Longitude are authoritative coordinates provided by the
 	// discovery source (e.g. KudaGo). When both are non-nil they take

@@ -52,6 +52,11 @@ func (r *CheckResult) IsTemporaryClosed() bool {
 
 // Checker verifies whether a place is open or closed
 // by querying an external map service.
+//
+// address is the known street address of the place (e.g. "Невский проспект, 28").
+// When non-empty, implementations should use it to anchor the lookup and
+// validate the result. When empty, implementations fall back to name+city only
+// (the pre-address-anchor behaviour — no validation performed).
 type Checker interface {
-	Check(ctx context.Context, name, city string) (*CheckResult, error)
+	Check(ctx context.Context, name, city, address string) (*CheckResult, error)
 }
