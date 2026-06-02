@@ -82,6 +82,10 @@ func (e *Enricher) Enrich(ctx context.Context, item Item) (*Result, error) {
 		e.metrics.cacheMiss()
 	}
 
+	// Seed source-provided coordinates unconditionally so every path
+	// (events, places with no URL, places with transient 2GIS errors) preserves them.
+	seedSourceCoords(item, &result.Facts)
+
 	// Maps status check (places only) — short-circuit if permanently closed.
 	if e.checkMapsStatus(ctx, item, result) {
 		if e.search != nil {
@@ -178,6 +182,20 @@ func mergeOrgDataToFacts(od *maps.OrgData, facts *Facts) {
 		facts.Latitude = &od.Latitude
 		facts.Longitude = &od.Longitude
 	}
+}
+
+// seedSourceCoords writes item.Latitude/Longitude into facts when the item
+// carries a pair of source-authoritative coordinates (both non-nil).
+// Called unconditionally at the top of Enrich so all paths (events, no-URL
+// places, transient maps errors) preserve source coords.
+// Must also be re-called in fetchAndExtract after extract.ExtractFacts resets
+// Facts to a zero-value struct — see enriche_fetch.go.
+func seedSourceCoords(item Item, facts *Facts) {
+	if item.Latitude == nil || item.Longitude == nil {
+		return // absent or incomplete pair — treat as not provided
+	}
+	facts.Latitude = item.Latitude
+	facts.Longitude = item.Longitude
 }
 
 // setFactIfNil sets *dst to &src if *dst is nil and src is non-empty.

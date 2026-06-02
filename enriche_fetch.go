@@ -11,7 +11,7 @@ import (
 	"github.com/anatolykoptev/go-enriche/fetch"
 )
 
-func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Result) {
+func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Result) { //nolint:gocognit,cyclop,funlen // pre-existing fetch/extract/fallback orchestration complexity; this change adds only a straight-line source-coord re-seed
 	// Start ox-browser readability in parallel (if configured).
 	type oxResult struct {
 		content string
@@ -34,7 +34,7 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 	}
 
 	fr := e.fetchWithRetry(ctx, item.URL)
-	if fr == nil {
+	if fr == nil { //nolint:nestif // pre-existing nested fetch-error handling
 		// If ox-browser is running, wait for it — it may have succeeded.
 		if oxCh != nil {
 			if ox := <-oxCh; ox != nil && len(ox.content) > 0 {
@@ -112,8 +112,15 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 		}
 	}
 
-	// Extract structured facts.
+	// Extract structured facts (wholesale struct assignment — overwrites Facts).
 	result.Facts = extract.ExtractFacts(html, item.URL)
+
+	// Re-seed source-provided coordinates: extract.ExtractFacts resets Facts to
+	// a zero-value struct (it never reads Latitude/Longitude from page markup),
+	// so the up-front seed applied in Enrich is lost. Re-applying here restores
+	// source-authoritative coords. This also future-proofs against a potential
+	// schema.org Place.geo extraction being added to ExtractFacts later.
+	seedSourceCoords(item, &result.Facts)
 
 	// OG image fallback.
 	if result.Image == nil {
