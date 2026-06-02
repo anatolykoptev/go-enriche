@@ -66,8 +66,12 @@ func (g *TwoGISGeocoder) Check(ctx context.Context, _, city, address string) (*C
 	}
 
 	params := url.Values{
-		"q":      {q},
-		"fields": {"items.point"},
+		"q": {q},
+		// items.type is required for the building-level precision gate: 2GIS
+		// returns meta.code=200 with coarse fallback items (adm_div, street,
+		// settlement) when no exact building is found. Without this field the
+		// gate cannot distinguish building from centroid.
+		"fields": {"items.point,items.type"},
 		"key":    {g.apiKey},
 	}
 
@@ -101,9 +105,26 @@ func (g *TwoGISGeocoder) Check(ctx context.Context, _, city, address string) (*C
 		return &CheckResult{Status: PlaceNotFound}, nil
 	}
 
-	// Take the first item that has a non-nil point.
+	// Take the first item that has a non-nil point AND building-level precision.
+	//
+	// Accept-set (verified via 2GIS /items/geocode with key=demo):
+	//   "building" — exact address resolution to a building polygon/point.
+	//   "branch"   — business branch tied to a building; carries a real building
+	//                point (not a centroid).
+	//
+	// Reject-set (coarse fallbacks — confident-WRONG for a specific address):
+	//   "adm_div"    — administrative division centroid (city, district, etc.)
+	//   "street"     — street midpoint/centroid
+	//   "settlement" — settlement centroid
+	//   ""           — unknown / field not returned; reject for safety
+	//
+	// Rejected items are skipped; if no building-level item is found the
+	// composite falls through to the by-name anchored checker.
 	for _, item := range gr.Result.Items {
 		if item.Point == nil {
+			continue
+		}
+		if item.Type != "building" && item.Type != "branch" {
 			continue
 		}
 		od := &OrgData{

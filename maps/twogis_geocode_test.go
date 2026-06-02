@@ -59,6 +59,7 @@ func TestTwoGISGeocoder_AddressPresent_ReturnsCoords(t *testing.T) {
 			Name:        "Дом Зингера",
 			AddressName: "Невский проспект, 28 / набережная канала Грибоедова, 21",
 			Point:       &twoGISPoint{Lat: 59.935858, Lon: 30.325908},
+			Type:        "building",
 		},
 	})
 
@@ -221,11 +222,176 @@ func TestTwoGISGeocoder_CityPrependedToAddress(t *testing.T) {
 	}
 }
 
+// TestTwoGISGeocoder_BuildingType_ReturnsCoords verifies that an item with
+// type "building" is accepted by the precision gate.
+//
+// Regression guard: if the type gate is removed or changed to reject
+// "building", this test → RED.
+func TestTwoGISGeocoder_BuildingType_ReturnsCoords(t *testing.T) {
+	resp := makeTwoGISGeocodeResponse([]twoGISItem{
+		{
+			Name:        "Дом Зингера",
+			AddressName: "Невский проспект, 28",
+			Point:       &twoGISPoint{Lat: 59.935858, Lon: 30.325908},
+			Type:        "building",
+		},
+	})
+
+	var hits atomic.Int32
+	srv := newTwoGISGeocodeMockServer(t, resp, &hits, nil)
+	defer srv.Close()
+
+	g := newTwoGISGeocodeCheckerWithURL(srv.URL)
+
+	result, err := g.Check(context.Background(), "Дом Зингера", "Санкт-Петербург", "Невский проспект, 28")
+	if err != nil {
+		t.Fatalf("Check() error: %v", err)
+	}
+	if result.Status == PlaceNotFound {
+		t.Errorf("status = PlaceNotFound, want non-NotFound (building type must be accepted)")
+	}
+	if result.OrgData == nil {
+		t.Fatal("OrgData is nil, want populated coords for building-type item")
+	}
+	if result.OrgData.Latitude != 59.935858 {
+		t.Errorf("Latitude = %f, want 59.935858", result.OrgData.Latitude)
+	}
+}
+
+// TestTwoGISGeocoder_AdmDivType_PlaceNotFound verifies that an item with
+// type "adm_div" (administrative division / city centroid) is REJECTED by
+// the precision gate even though it carries a point.
+//
+// Regression guard: reverting the type gate makes this pass vacuously because
+// the point is present — run RED to confirm it fails without the gate → GREEN
+// only after the gate is in place.
+func TestTwoGISGeocoder_AdmDivType_PlaceNotFound(t *testing.T) {
+	resp := makeTwoGISGeocodeResponse([]twoGISItem{
+		{
+			Name:  "Санкт-Петербург",
+			Point: &twoGISPoint{Lat: 59.939095, Lon: 30.315868},
+			Type:  "adm_div",
+		},
+	})
+
+	var hits atomic.Int32
+	srv := newTwoGISGeocodeMockServer(t, resp, &hits, nil)
+	defer srv.Close()
+
+	g := newTwoGISGeocodeCheckerWithURL(srv.URL)
+
+	result, err := g.Check(context.Background(), "Тест", "Санкт-Петербург", "Невский проспект, 1")
+	if err != nil {
+		t.Fatalf("Check() error: %v", err)
+	}
+	if result.Status != PlaceNotFound {
+		t.Errorf("status = %q, want PlaceNotFound (adm_div centroid must be rejected)", result.Status)
+	}
+}
+
+// TestTwoGISGeocoder_StreetType_PlaceNotFound verifies that an item with
+// type "street" (street centroid) is REJECTED by the precision gate.
+func TestTwoGISGeocoder_StreetType_PlaceNotFound(t *testing.T) {
+	resp := makeTwoGISGeocodeResponse([]twoGISItem{
+		{
+			Name:  "Невский проспект",
+			Point: &twoGISPoint{Lat: 59.930, Lon: 30.360},
+			Type:  "street",
+		},
+	})
+
+	var hits atomic.Int32
+	srv := newTwoGISGeocodeMockServer(t, resp, &hits, nil)
+	defer srv.Close()
+
+	g := newTwoGISGeocodeCheckerWithURL(srv.URL)
+
+	result, err := g.Check(context.Background(), "Кафе", "Санкт-Петербург", "Невский проспект, 10")
+	if err != nil {
+		t.Fatalf("Check() error: %v", err)
+	}
+	if result.Status != PlaceNotFound {
+		t.Errorf("status = %q, want PlaceNotFound (street centroid must be rejected)", result.Status)
+	}
+}
+
+// TestTwoGISGeocoder_MixedItems_FirstAdmDivSecondBuilding verifies that when
+// the first item is coarse (adm_div) and the second is "building", the
+// selector skips the coarse item and returns the building one.
+//
+// This is the mixed-items regression: the old code took item[0] unconditionally.
+func TestTwoGISGeocoder_MixedItems_FirstAdmDivSecondBuilding(t *testing.T) {
+	resp := makeTwoGISGeocodeResponse([]twoGISItem{
+		{
+			Name:  "Санкт-Петербург",
+			Point: &twoGISPoint{Lat: 59.939095, Lon: 30.315868},
+			Type:  "adm_div",
+		},
+		{
+			Name:        "Дом 28",
+			AddressName: "Невский проспект, 28",
+			Point:       &twoGISPoint{Lat: 59.935858, Lon: 30.325908},
+			Type:        "building",
+		},
+	})
+
+	var hits atomic.Int32
+	srv := newTwoGISGeocodeMockServer(t, resp, &hits, nil)
+	defer srv.Close()
+
+	g := newTwoGISGeocodeCheckerWithURL(srv.URL)
+
+	result, err := g.Check(context.Background(), "Дом 28", "Санкт-Петербург", "Невский проспект, 28")
+	if err != nil {
+		t.Fatalf("Check() error: %v", err)
+	}
+	if result.Status == PlaceNotFound {
+		t.Errorf("status = PlaceNotFound, want non-NotFound (building item present in list)")
+	}
+	if result.OrgData == nil {
+		t.Fatal("OrgData is nil, want populated coords from building item")
+	}
+	if result.OrgData.Latitude != 59.935858 {
+		t.Errorf("Latitude = %f, want 59.935858 (second/building item, not first/adm_div)", result.OrgData.Latitude)
+	}
+}
+
+// TestTwoGISGeocoder_FieldsIncludeItemsType verifies that the outgoing HTTP
+// request includes "items.type" in the fields parameter.
+//
+// Regression guard: if items.type is removed from fields, 2GIS won't return
+// the type field → gate can't function → this test → RED.
+func TestTwoGISGeocoder_FieldsIncludeItemsType(t *testing.T) {
+	resp := makeTwoGISGeocodeResponse([]twoGISItem{
+		{Name: "Кафе", Point: &twoGISPoint{Lat: 55.0, Lon: 37.0}, Type: "building"},
+	})
+
+	var hits atomic.Int32
+	var lastFields string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		lastFields = r.URL.Query().Get("fields")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	g := newTwoGISGeocodeCheckerWithURL(srv.URL)
+
+	_, err := g.Check(context.Background(), "Кафе", "Москва", "Арбат, 1")
+	if err != nil {
+		t.Fatalf("Check() error: %v", err)
+	}
+	if !strings.Contains(lastFields, "items.type") {
+		t.Errorf("fields param %q does not contain 'items.type', want it present for type gate", lastFields)
+	}
+}
+
 // TestTwoGISGeocoder_EmptyCityUsesAddressOnly verifies that when city is empty,
 // the q parameter is just the address (no leading comma/space junk).
 func TestTwoGISGeocoder_EmptyCityUsesAddressOnly(t *testing.T) {
 	resp := makeTwoGISGeocodeResponse([]twoGISItem{
-		{Name: "Кафе", Point: &twoGISPoint{Lat: 55.0, Lon: 37.0}},
+		{Name: "Кафе", Point: &twoGISPoint{Lat: 55.0, Lon: 37.0}, Type: "building"},
 	})
 
 	var hits atomic.Int32

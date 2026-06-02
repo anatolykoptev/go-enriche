@@ -47,9 +47,13 @@ type twoGISResponse struct {
 type twoGISItem struct {
 	Name        string            `json:"name"`
 	AddressName string            `json:"address_name"`
-	Schedule    *twoGISSchedule   `json:"schedule"`
-	Contacts    []twoGISContactGr `json:"contact_groups"`
-	Point       *twoGISPoint      `json:"point"`
+	// Type is the 2GIS item classification returned when "items.type" is
+	// included in the fields parameter. Building-level values: "building",
+	// "branch". Coarse fallback values: "adm_div", "street", "settlement".
+	Type     string            `json:"type"`
+	Schedule *twoGISSchedule   `json:"schedule"`
+	Contacts []twoGISContactGr `json:"contact_groups"`
+	Point    *twoGISPoint      `json:"point"`
 }
 
 type twoGISSchedule struct {
