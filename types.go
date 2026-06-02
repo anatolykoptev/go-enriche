@@ -24,6 +24,14 @@ type Item struct {
 	Mode   Mode
 	Source string // origin identifier
 	Topic  string // classification tag
+
+	// Latitude and Longitude are authoritative coordinates provided by the
+	// discovery source (e.g. KudaGo). When both are non-nil they take
+	// precedence over any coords resolved by the maps checker or geocoder.
+	// Must be provided as a pair (both or neither); a lone non-nil Latitude
+	// with a nil Longitude is treated as absent.
+	Latitude  *float64
+	Longitude *float64
 }
 
 // Result is the output of enrichment.
