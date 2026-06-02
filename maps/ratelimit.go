@@ -23,9 +23,10 @@ func NewRateLimited(c Checker, rps float64, burst int) *RateLimited {
 }
 
 // Check waits for a rate limit token, then delegates to the inner checker.
-func (r *RateLimited) Check(ctx context.Context, name, city string) (*CheckResult, error) {
+// address is passed through unchanged to the inner checker.
+func (r *RateLimited) Check(ctx context.Context, name, city, address string) (*CheckResult, error) {
 	if err := r.limiter.Wait(ctx); err != nil {
 		return nil, fmt.Errorf("rate limit: %w", err)
 	}
-	return r.inner.Check(ctx, name, city)
+	return r.inner.Check(ctx, name, city, address)
 }

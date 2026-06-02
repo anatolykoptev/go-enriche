@@ -478,7 +478,7 @@ type mockMapsChecker struct {
 	lon float64
 }
 
-func (m *mockMapsChecker) Check(_ context.Context, _, _ string) (*maps.CheckResult, error) {
+func (m *mockMapsChecker) Check(_ context.Context, _, _, _ string) (*maps.CheckResult, error) {
 	return &maps.CheckResult{
 		Status: maps.PlaceOpen,
 		OrgData: &maps.OrgData{
@@ -627,7 +627,7 @@ func TestEnrich_SourceCoords_PairGuard(t *testing.T) {
 // mockMapsCheckerError is a maps.Checker stub that always returns an error.
 type mockMapsCheckerError struct{}
 
-func (m *mockMapsCheckerError) Check(_ context.Context, _, _ string) (*maps.CheckResult, error) {
+func (m *mockMapsCheckerError) Check(_ context.Context, _, _, _ string) (*maps.CheckResult, error) {
 	return nil, errors.New("2GIS transient error")
 }
 

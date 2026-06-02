@@ -8,17 +8,19 @@ import (
 	"time"
 )
 
-// mockChecker is a controllable Checker for testing Resilient.
+// mockChecker is a controllable Checker for testing Resilient and CompositeChecker.
 type mockChecker struct {
-	calls  atomic.Int32
-	result *CheckResult
-	err    error
+	calls           atomic.Int32
+	result          *CheckResult
+	err             error
+	lastAddressRecv string // last address argument received
 	// block causes the mock to wait for ctx.Done before returning.
 	block bool
 }
 
-func (m *mockChecker) Check(ctx context.Context, _, _ string) (*CheckResult, error) {
+func (m *mockChecker) Check(ctx context.Context, _, _, address string) (*CheckResult, error) {
 	m.calls.Add(1)
+	m.lastAddressRecv = address
 	if m.block {
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -36,7 +38,7 @@ func TestResilient_SuccessPassThrough(t *testing.T) {
 	inner := &mockChecker{result: openResult}
 	r := NewResilient(inner, 0)
 
-	got, err := r.Check(context.Background(), "Place", "City")
+	got, err := r.Check(context.Background(), "Place", "City", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -53,7 +55,7 @@ func TestResilient_PlaceNotFoundIsSuccess(t *testing.T) {
 	inner := &mockChecker{result: &CheckResult{Status: PlaceNotFound}}
 	r := NewResilient(inner, 0)
 
-	got, err := r.Check(context.Background(), "Nowhere", "City")
+	got, err := r.Check(context.Background(), "Nowhere", "City", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -61,7 +63,7 @@ func TestResilient_PlaceNotFoundIsSuccess(t *testing.T) {
 		t.Errorf("status = %q, want PlaceNotFound", got.Status)
 	}
 	// Breaker must remain closed -- next call still hits inner.
-	got2, _ := r.Check(context.Background(), "Nowhere", "City")
+	got2, _ := r.Check(context.Background(), "Nowhere", "City", "")
 	if got2.Status != PlaceNotFound {
 		t.Errorf("second call status = %q, want PlaceNotFound", got2.Status)
 	}
@@ -77,7 +79,7 @@ func TestResilient_BreakerOpensAfterError(t *testing.T) {
 	r := NewResilient(inner, 0)
 
 	// First call: hits inner, triggers error, opens breaker.
-	got, err := r.Check(context.Background(), "P", "C")
+	got, err := r.Check(context.Background(), "P", "C", "")
 	if err == nil {
 		t.Fatalf("expected error from failed backend, got nil (result=%v)", got)
 	}
@@ -88,7 +90,7 @@ func TestResilient_BreakerOpensAfterError(t *testing.T) {
 	// Breaker is now open -- subsequent calls must short-circuit with ErrSuspended.
 	before := inner.calls.Load()
 	for range 3 {
-		got2, err2 := r.Check(context.Background(), "P", "C")
+		got2, err2 := r.Check(context.Background(), "P", "C", "")
 		if !errors.Is(err2, ErrSuspended) {
 			t.Errorf("suspended call error = %v, want ErrSuspended", err2)
 		}
@@ -109,7 +111,7 @@ func TestResilient_HalfOpenProbeOnExpiry(t *testing.T) {
 	r := NewResilient(inner, 0)
 
 	// Trip the breaker.
-	_, _ = r.Check(context.Background(), "P", "C")
+	_, _ = r.Check(context.Background(), "P", "C", "")
 
 	// Fast-forward past the suspend window by backdating suspendUntil.
 	r.cb.mu.Lock()
@@ -120,7 +122,7 @@ func TestResilient_HalfOpenProbeOnExpiry(t *testing.T) {
 	inner2 := &mockChecker{result: openResult}
 	r.inner = inner2
 
-	got, err := r.Check(context.Background(), "P", "C")
+	got, err := r.Check(context.Background(), "P", "C", "")
 	if err != nil {
 		t.Fatalf("half-open probe error: %v", err)
 	}
@@ -151,7 +153,7 @@ func TestResilient_TimeoutTreatedAsFailure(t *testing.T) {
 	r := NewResilient(inner, 10*time.Millisecond)
 
 	start := time.Now()
-	got, err := r.Check(context.Background(), "Slow", "City")
+	got, err := r.Check(context.Background(), "Slow", "City", "")
 	elapsed := time.Since(start)
 
 	if err == nil {
@@ -166,7 +168,7 @@ func TestResilient_TimeoutTreatedAsFailure(t *testing.T) {
 	}
 	// Breaker must be open after per-call timeout.
 	before := inner.calls.Load()
-	_, err2 := r.Check(context.Background(), "Slow", "City")
+	_, err2 := r.Check(context.Background(), "Slow", "City", "")
 	if !errors.Is(err2, ErrSuspended) {
 		t.Errorf("expected ErrSuspended after timeout, got %v", err2)
 	}
@@ -180,7 +182,7 @@ func TestResilient_NilResultFallsThrough(t *testing.T) {
 	inner := &mockChecker{result: nil, err: nil}
 	r := NewResilient(inner, 0)
 
-	got, err := r.Check(context.Background(), "P", "C")
+	got, err := r.Check(context.Background(), "P", "C", "")
 	if err == nil {
 		t.Fatalf("expected error for nil result, got nil (result=%v)", got)
 	}
@@ -208,7 +210,7 @@ func TestResilient_ParentCancelNotChargedToBreaker(t *testing.T) {
 		parentCancel()
 	}()
 
-	got, err := r.Check(parentCtx, "P", "C")
+	got, err := r.Check(parentCtx, "P", "C", "")
 	<-done
 
 	if err == nil {
@@ -222,7 +224,7 @@ func TestResilient_ParentCancelNotChargedToBreaker(t *testing.T) {
 	callsBefore := inner.calls.Load()
 	inner.block = false
 	inner.result = openResult
-	got2, err2 := r.Check(context.Background(), "P", "C")
+	got2, err2 := r.Check(context.Background(), "P", "C", "")
 	if err2 != nil {
 		t.Fatalf("post-cancel call error: %v (breaker opened when it should not have)", err2)
 	}
@@ -231,5 +233,26 @@ func TestResilient_ParentCancelNotChargedToBreaker(t *testing.T) {
 	}
 	if inner.calls.Load() == callsBefore {
 		t.Error("inner was not called after parent-cancel -- breaker incorrectly opened")
+	}
+}
+
+// TestChecker_AddressThreadedThrough verifies that Composite/RateLimited/Resilient
+// all pass the address argument down to the inner checker unmodified.
+func TestChecker_AddressThreadedThrough(t *testing.T) {
+	const wantAddress = "Невский проспект, 28"
+
+	inner := &mockChecker{result: openResult}
+
+	// Wrap in Resilient → RateLimited → Composite and verify all layers pass address.
+	resilient := NewResilient(inner, 0)
+	rateLimited := NewRateLimited(resilient, 100, 10)
+	composite := NewCompositeChecker(NamedChecker{Name: "test", Checker: rateLimited})
+
+	_, err := composite.Check(context.Background(), "Кафе Зингеръ", "Санкт-Петербург", wantAddress)
+	if err != nil {
+		t.Fatalf("Check() error: %v", err)
+	}
+	if inner.lastAddressRecv != wantAddress {
+		t.Errorf("inner received address %q, want %q", inner.lastAddressRecv, wantAddress)
 	}
 }

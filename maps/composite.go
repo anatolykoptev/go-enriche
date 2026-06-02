@@ -33,11 +33,12 @@ type NamedChecker struct {
 }
 
 // Check tries each checker in order until one returns a definitive status.
-func (c *CompositeChecker) Check(ctx context.Context, name, city string) (*CheckResult, error) {
+// address is passed through unchanged to every inner checker.
+func (c *CompositeChecker) Check(ctx context.Context, name, city, address string) (*CheckResult, error) {
 	var lastResult *CheckResult
 
 	for _, nc := range c.checkers {
-		result, err := nc.checker.Check(ctx, name, city)
+		result, err := nc.checker.Check(ctx, name, city, address)
 		if err != nil {
 			slog.Debug("composite checker: backend failed",
 				slog.String("backend", nc.name),

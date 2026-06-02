@@ -85,12 +85,15 @@ func NewYandexMaps(searxngURL string, opts ...YandexOption) (*YandexMaps, error)
 
 // Check queries for Yandex Maps org listings, then fetches each org page
 // to read the embedded status JSON ("permanent-closed", "temporary-closed", "open").
-func (y *YandexMaps) Check(ctx context.Context, name, city string) (*CheckResult, error) {
+//
+// When address is non-empty, it is included in the org-link search query so
+// the result is anchored to the right location (not just any branch by name).
+func (y *YandexMaps) Check(ctx context.Context, name, city, address string) (*CheckResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	orgURLs, err := y.findOrgURLs(ctx, name, city)
+	orgURLs, err := y.findOrgURLs(ctx, name, city, address)
 	if err != nil {
 		return nil, fmt.Errorf("yandex: search: %w", err)
 	}
@@ -128,8 +131,16 @@ type searxngResult struct {
 }
 
 // findOrgURLs searches for Yandex Maps org links using SearchFunc or SearXNG.
-func (y *YandexMaps) findOrgURLs(ctx context.Context, name, city string) ([]string, error) {
+// When address is non-empty, the distinctive street-name tokens (city, house
+// numbers, generic adjectives stripped) are appended to anchor the search on
+// the correct location without over-constraining it with full address verbatim.
+func (y *YandexMaps) findOrgURLs(ctx context.Context, name, city, address string) ([]string, error) {
 	query := fmt.Sprintf(`site:yandex.ru/maps/org "%s" %s`, name, city)
+	if address != "" {
+		if hint := addressStreetHint(address, city); hint != "" {
+			query += " " + hint
+		}
+	}
 
 	if y.searchFunc != nil {
 		return y.findOrgURLsViaFunc(ctx, query)

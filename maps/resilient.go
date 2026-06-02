@@ -101,13 +101,14 @@ func NewResilient(inner Checker, timeout time.Duration) *Resilient {
 }
 
 // Check delegates to the inner Checker unless the circuit breaker is open.
+// address is passed through unchanged to the inner checker.
 //
 // Return contract:
 //   - breaker open:          (nil, ErrSuspended)
 //   - inner returns error:   (nil, err) -- parent-ctx cancel is NOT recorded as backend failure
 //   - inner returns nil,nil: (nil, errNilResult) -- contract violation, treated as failure
 //   - inner returns result:  (result, nil) -- including PlaceNotFound (healthy response)
-func (r *Resilient) Check(ctx context.Context, name, city string) (*CheckResult, error) {
+func (r *Resilient) Check(ctx context.Context, name, city, address string) (*CheckResult, error) {
 	if r.cb.isSuspended() {
 		return nil, ErrSuspended
 	}
@@ -119,7 +120,7 @@ func (r *Resilient) Check(ctx context.Context, name, city string) (*CheckResult,
 		defer cancel()
 	}
 
-	result, err := r.inner.Check(callCtx, name, city)
+	result, err := r.inner.Check(callCtx, name, city, address)
 	if err != nil {
 		// Do NOT charge this against the breaker if the CALLER's context is already
 		// done -- a parent cancellation or deadline is not the backend's fault.
