@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -24,11 +25,13 @@ func makeTwoGISResponse(items []twoGISItem) twoGISResponse {
 type twoGISTransport struct {
 	target string
 	// lastQuery captures the "q" query parameter of the most recent request.
-	lastQuery string
+	lastQuery  string
+	lastFields string
 }
 
 func (rt *twoGISTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	rt.lastQuery = req.URL.Query().Get("q")
+	rt.lastFields = req.URL.Query().Get("fields")
 	newURL := rt.target + "?" + req.URL.RawQuery
 	newReq, err := http.NewRequestWithContext(req.Context(), req.Method, newURL, req.Body)
 	if err != nil {
@@ -38,18 +41,51 @@ func (rt *twoGISTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	return http.DefaultTransport.RoundTrip(newReq)
 }
 
-func newTwoGISMockServer(t *testing.T, resp twoGISResponse, checkFields bool) *httptest.Server {
+func newTwoGISMockServer(t *testing.T, resp twoGISResponse) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if checkFields {
-			fields := r.URL.Query().Get("fields")
-			if !strings.Contains(fields, "items.point") {
-				t.Errorf("fields %q does not include items.point", fields)
-			}
-		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
+}
+
+// newTwoGISCheckerWithTransport builds a test TwoGISChecker wired to the mock server.
+func newTwoGISCheckerWithTransport(srv *httptest.Server, rt *twoGISTransport, cfg TwoGISConfig) *TwoGISChecker {
+	if cfg.APIKey == "" {
+		cfg.APIKey = "demo"
+	}
+	return &TwoGISChecker{
+		apiKey:            cfg.APIKey,
+		client:            &http.Client{Transport: rt},
+		onAddressRejected: cfg.OnAddressRejected,
+	}
+}
+
+func TestTwoGIS_FieldsContainAddressName(t *testing.T) {
+	resp := makeTwoGISResponse([]twoGISItem{
+		{
+			Name:        "Кофейня Центр",
+			AddressName: "Невский пр., 1",
+			Point:       &twoGISPoint{Lat: 59.9343, Lon: 30.3351},
+		},
+	})
+	rt := &twoGISTransport{}
+	srv := newTwoGISMockServer(t, resp)
+	defer srv.Close()
+	rt.target = srv.URL
+
+	checker := newTwoGISCheckerWithTransport(srv, rt, TwoGISConfig{})
+	_, err := checker.Check(context.Background(), "Кофейня Центр", "Санкт-Петербург", "Невский пр., 1")
+	if err != nil {
+		t.Fatalf("Check() error: %v", err)
+	}
+	// address_name must be in fields so validation has data to work with.
+	if !strings.Contains(rt.lastFields, "items.address_name") {
+		t.Errorf("fields %q does not include items.address_name (required for validation)", rt.lastFields)
+	}
+	if !strings.Contains(rt.lastFields, "items.point") {
+		t.Errorf("fields %q does not include items.point", rt.lastFields)
+	}
 }
 
 func TestTwoGIS_CoordsPopulated(t *testing.T) {
@@ -60,7 +96,7 @@ func TestTwoGIS_CoordsPopulated(t *testing.T) {
 			Point:       &twoGISPoint{Lat: 59.9343, Lon: 30.3351},
 		},
 	})
-	srv := newTwoGISMockServer(t, resp, true)
+	srv := newTwoGISMockServer(t, resp)
 	defer srv.Close()
 
 	checker := &TwoGISChecker{
@@ -94,7 +130,7 @@ func TestTwoGIS_NoPointLeavesCoordsZero(t *testing.T) {
 			Point:       nil,
 		},
 	})
-	srv := newTwoGISMockServer(t, resp, false)
+	srv := newTwoGISMockServer(t, resp)
 	defer srv.Close()
 
 	checker := &TwoGISChecker{
@@ -118,8 +154,8 @@ func TestTwoGIS_NoPointLeavesCoordsZero(t *testing.T) {
 }
 
 // TestTwoGIS_AddressAnchoredQuery_HitWithMatchingAddress verifies that when an
-// address is provided and the 2GIS result's address_name overlaps it, the result
-// is accepted and coordinates are returned.
+// address is provided and the 2GIS result's address_name overlaps it on a
+// distinctive token, the result is accepted and coordinates are returned.
 func TestTwoGIS_AddressAnchoredQuery_HitWithMatchingAddress(t *testing.T) {
 	resp := makeTwoGISResponse([]twoGISItem{
 		{
@@ -128,15 +164,12 @@ func TestTwoGIS_AddressAnchoredQuery_HitWithMatchingAddress(t *testing.T) {
 			Point:       &twoGISPoint{Lat: 59.9357, Lon: 30.3261},
 		},
 	})
-	rt := &twoGISTransport{target: ""}
-	srv := newTwoGISMockServer(t, resp, false)
+	rt := &twoGISTransport{}
+	srv := newTwoGISMockServer(t, resp)
 	defer srv.Close()
 	rt.target = srv.URL
 
-	checker := &TwoGISChecker{
-		apiKey: "demo",
-		client: &http.Client{Transport: rt},
-	}
+	checker := newTwoGISCheckerWithTransport(srv, rt, TwoGISConfig{})
 
 	result, err := checker.Check(context.Background(), "Кафе Singer", "Санкт-Петербург", "Невский пр., 28")
 	if err != nil {
@@ -162,8 +195,6 @@ func TestTwoGIS_AddressAnchoredQuery_HitWithMatchingAddress(t *testing.T) {
 // the query address (totally different street), Check returns PlaceNotFound so
 // CompositeChecker falls through to Yandex rather than using the wrong coordinates.
 func TestTwoGIS_AddressAnchoredQuery_RejectedOnMismatch(t *testing.T) {
-	// Simulates 2GIS returning "Giovanni medici" on "улица Чайковского, 83/7"
-	// when the actual query was anchored on "Невский, 28".
 	resp := makeTwoGISResponse([]twoGISItem{
 		{
 			Name:        "Giovanni medici, итальянский ресторан",
@@ -171,12 +202,14 @@ func TestTwoGIS_AddressAnchoredQuery_RejectedOnMismatch(t *testing.T) {
 			Point:       &twoGISPoint{Lat: 59.9440, Lon: 30.3600},
 		},
 	})
-	srv := newTwoGISMockServer(t, resp, false)
+	srv := newTwoGISMockServer(t, resp)
 	defer srv.Close()
 
+	var rejected atomic.Int32
 	checker := &TwoGISChecker{
-		apiKey: "demo",
-		client: &http.Client{Transport: &twoGISTransport{target: srv.URL}},
+		apiKey:            "demo",
+		client:            &http.Client{Transport: &twoGISTransport{target: srv.URL}},
+		onAddressRejected: func() { rejected.Add(1) },
 	}
 
 	result, err := checker.Check(context.Background(), "Кафе Singer", "Санкт-Петербург", "Невский пр., 28")
@@ -186,13 +219,14 @@ func TestTwoGIS_AddressAnchoredQuery_RejectedOnMismatch(t *testing.T) {
 	if result.Status != PlaceNotFound {
 		t.Errorf("status = %q, want PlaceNotFound (address mismatch must be rejected)", result.Status)
 	}
+	if rejected.Load() != 1 {
+		t.Errorf("OnAddressRejected fired %d times, want 1", rejected.Load())
+	}
 }
 
 // TestTwoGIS_EmptyAddress_NoValidation verifies that when no address is provided
 // the legacy behaviour is preserved: items[0] is accepted without validation.
 func TestTwoGIS_EmptyAddress_NoValidation(t *testing.T) {
-	// Return a result with a completely different address — without an anchor
-	// address, we cannot validate, so it is accepted as-is.
 	resp := makeTwoGISResponse([]twoGISItem{
 		{
 			Name:        "Некое место",
@@ -200,7 +234,7 @@ func TestTwoGIS_EmptyAddress_NoValidation(t *testing.T) {
 			Point:       &twoGISPoint{Lat: 55.7558, Lon: 37.6176},
 		},
 	})
-	srv := newTwoGISMockServer(t, resp, false)
+	srv := newTwoGISMockServer(t, resp)
 	defer srv.Close()
 
 	checker := &TwoGISChecker{
@@ -228,7 +262,7 @@ func TestTwoGIS_AddressAbbreviationNormalised(t *testing.T) {
 			Point:       &twoGISPoint{Lat: 59.9357, Lon: 30.3261},
 		},
 	})
-	srv := newTwoGISMockServer(t, resp, false)
+	srv := newTwoGISMockServer(t, resp)
 	defer srv.Close()
 
 	checker := &TwoGISChecker{
@@ -236,8 +270,7 @@ func TestTwoGIS_AddressAbbreviationNormalised(t *testing.T) {
 		client: &http.Client{Transport: &twoGISTransport{target: srv.URL}},
 	}
 
-	// Query uses abbreviated form "пр.", result uses full form "проспект" —
-	// "Невский" is the shared street-name token after noise removal.
+	// "Невский" is the shared distinctive token after noise removal.
 	result, err := checker.Check(context.Background(), "Кафе Зингеръ", "Санкт-Петербург", "Невский пр., 28")
 	if err != nil {
 		t.Fatalf("Check() error: %v", err)
@@ -254,46 +287,101 @@ func TestAddressTokensOverlap(t *testing.T) {
 		name   string
 		query  string
 		result string
+		city   string
 		want   bool
 	}{
 		{
 			name:   "same street abbreviated vs full",
 			query:  "Невский пр., 28",
 			result: "Невский проспект, 28",
+			city:   "Санкт-Петербург",
 			want:   true, // "невский" shared
 		},
 		{
 			name:   "entirely different streets",
 			query:  "Невский пр., 28",
 			result: "улица Чайковского, 83/7",
+			city:   "Санкт-Петербург",
 			want:   false,
 		},
 		{
-			name:   "shared city token should not count (city stripped by caller)",
+			name:   "Большая Морская vs Большая Конюшенная — generic adjective must not match",
+			query:  "Большая Морская, 18",
+			result: "Большая Конюшенная, 12",
+			city:   "Санкт-Петербург",
+			want:   false, // "большая" stripped; "морская" vs "конюшенная" — no overlap
+		},
+		{
+			name:   "наб реки Мойки vs наб реки Фонтанки — generic geo-noun must not match",
+			query:  "наб. реки Мойки, 12",
+			result: "набережная реки Фонтанки, 90",
+			city:   "Санкт-Петербург",
+			want:   false, // "реки" stripped; "мойки" vs "фонтанки" — no overlap
+		},
+		{
+			name:   "Тверская Москва vs Арбат Москва — city token must not match",
+			query:  "Тверская, 5, Москва",
+			result: "Арбат, 10, Москва",
+			city:   "Москва",
+			want:   false, // "москва" stripped; "тверская" vs "арбат" — no overlap
+		},
+		{
+			name:   "Ленина 28а vs Мира 28а — house number with Cyrillic suffix must not match",
+			query:  "Ленина, 28а",
+			result: "Мира, 28а",
+			city:   "",
+			want:   false, // "28а" starts with digit → house number; "ленина" vs "мира" — no overlap
+		},
+		{
+			name:   "Малая Садовая vs Малая Конюшенная — generic adjective must not match",
+			query:  "Малая Садовая, 3",
+			result: "Малая Конюшенная, 5",
+			city:   "Санкт-Петербург",
+			want:   false, // "малая" stripped; "садовая" vs "конюшенная" — no overlap
+		},
+		{
+			name:   "ул Рубинштейна 5 vs улица Рубинштейна д 5 — legit formatting variant",
+			query:  "ул. Рубинштейна, 5",
+			result: "улица Рубинштейна, д. 5",
+			city:   "Санкт-Петербург",
+			want:   true, // "рубинштейна" shared
+		},
+		{
+			name:   "Невский пр 28 vs проспект Невский 28 — reordering accepted",
 			query:  "Невский пр., 28",
-			result: "Большая Морская, 18",
-			want:   false,
+			result: "проспект Невский, 28",
+			city:   "Санкт-Петербург",
+			want:   true, // "невский" shared
 		},
 		{
 			name:   "abbreviation variants for переулок",
 			query:  "Столярный пер., 3",
 			result: "Столярный переулок, 3",
-			want:   true,
+			city:   "Санкт-Петербург",
+			want:   true, // "столярный" shared
 		},
 		{
-			name:   "house number variance only — different streets",
+			name:   "house number variance — same street",
 			query:  "Лиговский пр., 28",
 			result: "Лиговский пр., 14",
-			want:   true, // street name "лиговский" matches; house differs but still same street
+			city:   "Санкт-Петербург",
+			want:   true, // "лиговский" shared; house numbers differ but street matches
+		},
+		{
+			name:   "city abbreviation спб stripped — different streets",
+			query:  "Садовая, 5, спб",
+			result: "Литейный пр., 5, спб",
+			city:   "Санкт-Петербург",
+			want:   false, // "спб" stripped as city synonym; "садовая" vs "литейный" — no overlap
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := addressTokensOverlap(tt.query, tt.result)
+			got := addressTokensOverlap(tt.query, tt.result, tt.city)
 			if got != tt.want {
-				t.Errorf("addressTokensOverlap(%q, %q) = %v, want %v",
-					tt.query, tt.result, got, tt.want)
+				t.Errorf("addressTokensOverlap(%q, %q, city=%q) = %v, want %v",
+					tt.query, tt.result, tt.city, got, tt.want)
 			}
 		})
 	}

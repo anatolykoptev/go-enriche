@@ -131,12 +131,15 @@ type searxngResult struct {
 }
 
 // findOrgURLs searches for Yandex Maps org links using SearchFunc or SearXNG.
-// When address is non-empty it is appended to the query to anchor on the
-// correct location.
+// When address is non-empty, the distinctive street-name tokens (city, house
+// numbers, generic adjectives stripped) are appended to anchor the search on
+// the correct location without over-constraining it with full address verbatim.
 func (y *YandexMaps) findOrgURLs(ctx context.Context, name, city, address string) ([]string, error) {
 	query := fmt.Sprintf(`site:yandex.ru/maps/org "%s" %s`, name, city)
 	if address != "" {
-		query += " " + address
+		if hint := addressStreetHint(address, city); hint != "" {
+			query += " " + hint
+		}
 	}
 
 	if y.searchFunc != nil {
