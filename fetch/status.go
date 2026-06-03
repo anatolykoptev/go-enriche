@@ -6,12 +6,13 @@ import "net/http"
 type PageStatus string
 
 const (
-	StatusActive      PageStatus = "active"
-	StatusNotFound    PageStatus = "not_found"
-	StatusRedirect    PageStatus = "redirect"
-	StatusUnreachable PageStatus = "unreachable"
-	StatusWebsiteDown PageStatus = "website_down"
-	StatusClosed      PageStatus = "closed"
+	StatusActive          PageStatus = "active"
+	StatusNotFound        PageStatus = "not_found"
+	StatusRedirect        PageStatus = "redirect"
+	StatusUnreachable     PageStatus = "unreachable"
+	StatusWebsiteDown     PageStatus = "website_down"
+	StatusClosed          PageStatus = "closed"
+	StatusTemporaryClosed PageStatus = "temporarily_closed"
 )
 
 // FetchResult is the output of a page fetch.

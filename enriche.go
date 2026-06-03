@@ -142,7 +142,8 @@ func (e *Enricher) EnrichBatch(ctx context.Context, items []Item) []*Result {
 }
 
 // checkMapsStatus queries the maps checker for place closure status.
-// Only runs for ModePlaces. Returns true if the place is permanently closed.
+// Only runs for ModePlaces. Returns true if the place is permanently or
+// temporarily closed (short-circuits enrichment with the appropriate status).
 // When OrgData is available, merges business data into facts (fill-nil-only).
 func (e *Enricher) checkMapsStatus(ctx context.Context, item Item, result *Result) bool {
 	if e.mapsChecker == nil || item.Mode != ModePlaces {
@@ -165,6 +166,12 @@ func (e *Enricher) checkMapsStatus(ctx context.Context, item Item, result *Resul
 	if cr.IsClosed() {
 		result.Status = fetch.StatusClosed
 		e.logger.InfoContext(ctx, "enriche: place permanently closed on maps",
+			"name", item.Name, "map_url", cr.MapURL)
+		return true
+	}
+	if cr.IsTemporaryClosed() {
+		result.Status = fetch.StatusTemporaryClosed
+		e.logger.InfoContext(ctx, "enriche: place temporarily closed on maps",
 			"name", item.Name, "map_url", cr.MapURL)
 		return true
 	}
