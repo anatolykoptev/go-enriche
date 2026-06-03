@@ -702,6 +702,49 @@ func TestEnrich_SourceCoords_EventsNoURL(t *testing.T) {
 	}
 }
 
+// --- Maps temporary-closed status tests (F14) ---
+
+// stubMapsChecker is a configurable maps.Checker stub for closure-status tests.
+type stubMapsChecker struct {
+	res *maps.CheckResult
+	err error
+}
+
+func (s stubMapsChecker) Check(_ context.Context, _, _, _ string) (*maps.CheckResult, error) {
+	return s.res, s.err
+}
+
+// TestCheckMapsStatus_TemporaryClosed_MapsToTemporaryStatus verifies that
+// PlaceTemporaryClosed short-circuits enrichment with StatusTemporaryClosed
+// instead of falling through to fetchAndExtract (which would set StatusActive).
+func TestCheckMapsStatus_TemporaryClosed_MapsToTemporaryStatus(t *testing.T) {
+	t.Parallel()
+	e := New(WithMapsChecker(stubMapsChecker{
+		res: &maps.CheckResult{Status: maps.PlaceTemporaryClosed, MapURL: "https://2gis.ru/x"},
+	}))
+	result, err := e.Enrich(context.Background(), Item{Name: "Закрытое кафе", Mode: ModePlaces, City: "СПб"})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+	if result.Status != fetch.StatusTemporaryClosed {
+		t.Errorf("Status = %q, want %q", result.Status, fetch.StatusTemporaryClosed)
+	}
+}
+
+// TestCheckMapsStatus_PermanentClosed_StillMapsToClosed verifies that the existing
+// PlacePermanentClosed → StatusClosed mapping is not broken by the F14 change.
+func TestCheckMapsStatus_PermanentClosed_StillMapsToClosed(t *testing.T) {
+	t.Parallel()
+	e := New(WithMapsChecker(stubMapsChecker{res: &maps.CheckResult{Status: maps.PlacePermanentClosed}}))
+	result, err := e.Enrich(context.Background(), Item{Name: "X", Mode: ModePlaces})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+	if result.Status != fetch.StatusClosed {
+		t.Errorf("Status = %q, want %q", result.Status, fetch.StatusClosed)
+	}
+}
+
 // TestEnrich_SourceCoords_PairGuard_LonOnly is the reverse of TestEnrich_SourceCoords_PairGuard:
 // a lone Longitude with nil Latitude must also be treated as absent so it does not
 // produce a half-coord. The maps checker fills instead.

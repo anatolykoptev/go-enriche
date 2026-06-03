@@ -57,12 +57,13 @@ type PageStatus = fetch.PageStatus
 
 // Re-exported PageStatus constants so consumers don't need to import fetch.
 const (
-	StatusActive      = fetch.StatusActive
-	StatusNotFound    = fetch.StatusNotFound
-	StatusRedirect    = fetch.StatusRedirect
-	StatusUnreachable = fetch.StatusUnreachable
-	StatusWebsiteDown = fetch.StatusWebsiteDown
-	StatusClosed      = fetch.StatusClosed
+	StatusActive          = fetch.StatusActive
+	StatusNotFound        = fetch.StatusNotFound
+	StatusRedirect        = fetch.StatusRedirect
+	StatusUnreachable     = fetch.StatusUnreachable
+	StatusWebsiteDown     = fetch.StatusWebsiteDown
+	StatusClosed          = fetch.StatusClosed
+	StatusTemporaryClosed = fetch.StatusTemporaryClosed
 )
 
 // ContentMeta holds article metadata extracted by trafilatura.

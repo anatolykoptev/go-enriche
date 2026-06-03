@@ -75,7 +75,8 @@ func WithMetrics(m *Metrics) Option {
 
 // WithMapsChecker sets a maps.Checker for place status verification.
 // Only effective for ModePlaces items. If the checker reports a place
-// as permanently closed, enrichment short-circuits with StatusClosed.
+// as permanently or temporarily closed, enrichment short-circuits with
+// StatusClosed or StatusTemporaryClosed respectively.
 func WithMapsChecker(c maps.Checker) Option {
 	return func(e *Enricher) { e.mapsChecker = c }
 }
