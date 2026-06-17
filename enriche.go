@@ -4,7 +4,10 @@ package enriche
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -295,8 +298,27 @@ func (e *Enricher) Search(ctx context.Context, query, timeRange string) (*search
 const cacheSchemaVersion = "v2"
 
 func cacheKey(item Item) string {
-	if item.URL != "" {
-		return "enriche:" + cacheSchemaVersion + ":" + item.URL
+	base := "enriche:" + cacheSchemaVersion + ":" + item.URL
+	if item.URL == "" {
+		base = "enriche:search:" + cacheSchemaVersion + ":" + item.Name
 	}
-	return "enriche:search:" + cacheSchemaVersion + ":" + item.Name
+	// Operator-verified seed values are part of the cache identity: a different
+	// seed MUST resolve to a different entry, otherwise a blob cached before the
+	// operator verified a value would be served despite a fresh seed, silently
+	// bypassing the override-precedence guarantee (the rotating-DNI-proxy class
+	// this provenance work exists to prevent). The empty-seed fingerprint is
+	// appended unconditionally so a seeded and an unseeded call never collide;
+	// the common no-seed case keeps a single stable suffix.
+	return base + ":seed:" + seedFingerprint(item.Seed)
+}
+
+// seedFingerprint returns a short stable hash of the operator-verified seed.
+// The zero SeedFacts hashes to a fixed value, so unseeded calls share one key.
+func seedFingerprint(s SeedFacts) string {
+	if (s == SeedFacts{}) {
+		return "none"
+	}
+	h := sha256.Sum256([]byte(fmt.Sprintf("%q|%q|%q|%q|%q|%q",
+		s.PlaceName, s.Address, s.Phone, s.Website, s.Hours, s.Price)))
+	return hex.EncodeToString(h[:8])
 }

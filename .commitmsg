@@ -1,0 +1,20 @@
+fix(enriche): fold operator seed into cache key (review MAJOR)
+
+code-quality review of PR-15 found the cache-hit path bypassed the operator
+seed: cacheKey omitted item.Seed, so a blob cached before the operator
+verified a value would be served despite a fresh seed, silently defeating
+the override-precedence guarantee for any WithCache+Seed consumer (latent
+today: the live go-wp consumer does not enable WithCache, but PR-3 wires
+Seed into the consumer).
+
+- cacheKey now folds a stable seed fingerprint (sha256 over the SeedFacts);
+  the zero seed hashes to a fixed "none" so unseeded calls share one key and
+  a seeded call can never collide with an unseeded blob.
+- TestEnrich_Cache_SeedNotBypassed: an unseeded-then-seeded enrich serves the
+  operator value (not the stale blob), and a same-seed repeat still cache-hits.
+
+Also (review MINOR/NIT): dropped the misleading setConfidence/DNI forward-
+reference from confidenceFor doc and removed the unused confMedium const
+(reintroduced in the DNI sub-phase that emits it).
+
+go test -race -count=1 green; golangci-lint v2.10.1 0 issues.

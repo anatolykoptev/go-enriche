@@ -63,17 +63,19 @@ func (s fieldSource) String() string {
 type confidence string
 
 const (
-	confHigh   confidence = "high"
-	confMedium confidence = "medium"
-	confLow    confidence = "low"
+	confHigh confidence = "high"
+	confLow  confidence = "low"
+	// confMedium ("medium") is reserved for the finer official_site gradation
+	// (not-own-domain / regex-only / DNI-rotating) and is introduced in the
+	// follow-up sub-phase that actually emits it.
 )
 
 // confidenceFor derives the agent-facing confidence from the winning source
 // (ADR-006 table). operator_verified and official_site are high-trust; every
 // aggregator/maps/search value is low (the agent should omit or mark
-// «уточняйте»). A finer official_site gradation (medium for not-own-domain,
-// low for regex-only) is layered on later by the extractor/DNI detector, which
-// can DOWNGRADE via setConfidence; this base mapping is the floor.
+// «уточняйте»). This base mapping is the floor; a finer official_site
+// gradation (medium for not-own-domain, low for regex-only / DNI-rotating) is a
+// follow-up sub-phase (a medium bucket is reserved for it and not yet emitted).
 func confidenceFor(src fieldSource) confidence {
 	switch src {
 	case sourceOperatorVerified, sourceOfficialSite:
