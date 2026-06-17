@@ -164,7 +164,6 @@ func TestResolvePhoneForCity_TollFreeDemoted(t *testing.T) {
 	}
 }
 
-
 // The genuine guard for the social-link PRE-CHECK in resolvePhoneForCity: with
 // a known city AND a city-local (812) candidate present, the area-code
 // tiebreaker WOULD pick the local 812 — but the social-link pre-check runs
