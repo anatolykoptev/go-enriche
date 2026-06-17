@@ -1,6 +1,9 @@
 <!DOCTYPE html><html lang="ru"><head>
 <meta charset="utf-8"><title>Игора Драйв</title>
 <meta property="og:title" content="Игора Драйв"/>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Organization","name":"Игора","telephone":"+7 (800) 555-35-35"}
+</script>
 </head><body>
 <header class="header">
   <p class="header__nav-phone"><a class="header__nav-phone-link" href="tel:+78126157000">+7 (812) 615 70 00</a></p>
@@ -11,8 +14,7 @@
 </div>
 <main><p>Рекомендуем перед поездкой на автодром уточнять актуальные данные по телефону: 8 (812) 615-70-00.</p></main>
 <footer class="footer"><ul class="footer__contacts-list"><li>Общий<br><a href="tel:+78126157000">+7 (812) 615 70 00</a></li></ul></footer>
-<div style="display:none" itemscope itemtype="http://schema.org/Organization">
-  <meta itemprop="name" content="Игора"/>
-  <meta itemprop="telephone" content="+7 (812) 615 70 00"/>
-</div>
+<!-- itemprop=telephone intentionally OMITTED: without it the ONLY source of
+     the correct number is the contacts-region tel: href, so this fixture fails
+     unless applyContactOverride beats the mango 8-800 widget tel:. -->
 </body></html>

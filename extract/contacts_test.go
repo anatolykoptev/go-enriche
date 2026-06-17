@@ -100,3 +100,67 @@ func TestApplyContactOverride_BodyTelDoesNotBeatJSONLD(t *testing.T) {
 		t.Fatalf("JSON-LD must win over body tel:, got %v", facts.Phone)
 	}
 }
+
+// Regression for the reviewer-reproduced wrong-phone vector (PR #13 review):
+// a real contacts-region tel: wrapped in a GENERIC widget container
+// (WordPress .widget / Bitrix #bx-widget-area) must NOT be demoted, so it
+// still beats a call-tracking JSON-LD telephone. The old narrow logic used
+// [class*=widget]/[id*=widget] which falsely demoted these and let the 8-800
+// JSON-LD win.
+func TestApplyContactOverride_GenericWidgetWrapperNotDemoted(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		html string
+	}{
+		{
+			name: "wordpress_footer_widget_aside",
+			html: `<html><head>
+			<script type="application/ld+json">
+			{"@context":"https://schema.org","@type":"LocalBusiness","telephone":"+7 (800) 555-35-35"}
+			</script></head><body>
+			<footer class="footer"><aside class="widget widget_text">
+			  <a href="tel:+78126157000">+7 (812) 615 70 00</a>
+			</aside></footer></body></html>`,
+		},
+		{
+			name: "bitrix_header_bx_widget_area",
+			html: `<html><head>
+			<script type="application/ld+json">
+			{"@context":"https://schema.org","@type":"Organization","telephone":"+7 (800) 555-35-35"}
+			</script></head><body>
+			<header class="header"><div id="bx-widget-area">
+			  <a href="tel:+78126157000">+7 (812) 615 70 00</a>
+			</div></header></body></html>`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			facts := ExtractFacts(tc.html, "https://example.com")
+			if facts.Phone == nil {
+				t.Fatal("want contacts-region phone, got nil")
+			}
+			if *facts.Phone != "+7 (812) 615 70 00" {
+				t.Errorf("generic widget wrapper must not demote real contacts tel:; want +7 (812) 615 70 00, got %q", *facts.Phone)
+			}
+		})
+	}
+}
+
+// Conversely: a NAMED call-tracking widget nested INSIDE the contacts region
+// must still be demoted, so its tracking number does not win.
+func TestApplyContactOverride_CallTrackingNestedInContactsIsDemoted(t *testing.T) {
+	t.Parallel()
+	// Footer contains both the real tel: and a comagic tracking tel: nested
+	// inside the footer. The real one (not call-tracking) must win.
+	html := `<html><body>
+	<footer class="footer">
+	  <div class="comagic-phone"><a href="tel:+78005553535">8 (800) 555-35-35</a></div>
+	  <address><a href="tel:+78123334455">+7 (812) 333-44-55</a></address>
+	</footer></body></html>`
+	facts := ExtractFacts(html, "https://example.com")
+	if facts.Phone == nil || *facts.Phone != "+7 (812) 333-44-55" {
+		t.Fatalf("nested call-tracking tel: must be demoted; want +7 (812) 333-44-55, got %v", facts.Phone)
+	}
+}

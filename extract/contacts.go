@@ -26,6 +26,9 @@ type SiteContacts struct {
 	// page, e.g. body), or "" when Phone is nil.
 	PhoneRegion string
 	// Email is the first mailto: address found, trimmed of any query string.
+	// NOTE: Facts has no Email field yet, so applyContactOverride does not
+	// consume this — it is groundwork for the source-priority resolver (P2),
+	// extracted here so the single DOM pass covers all contact facts.
 	Email *string
 }
 
@@ -40,11 +43,18 @@ const (
 // area. A tel: inside any of these outranks a tel: elsewhere on the page.
 const contactsRegionSelectors = "header, footer, address, .contacts, .contact, #contacts, #contact, .footer, .header"
 
-// widgetAncestorSelectors mark DOM subtrees owned by embedded third-party
-// booking/call-tracking widgets. A tel: inside one of these is demoted — it is
-// the wrong-phone vector (a call-tracking number injected by mango/calltouch/
-// comagic/etc.), not the venue's own line.
-const widgetAncestorSelectors = "iframe, .widget, .b24-widget, [class*=calltrack], [class*=calltouch], [class*=comagic], [id*=widget]"
+// callTrackingSelectors mark DOM subtrees injected by named call-tracking
+// vendors. A tel: inside one of these is a dynamic tracking number, not the
+// venue's own line — the wrong-phone vector this layer defeats.
+//
+// Deliberately NARROW (specific vendor classes only): generic substrings like
+// [class*=widget] / [id*=widget] match standard WordPress (.widget,
+// widget-area) and Bitrix (bx-widget) wrappers that legitimately contain the
+// real contacts-region tel:, which would re-create the wrong-phone bug. A
+// generic widget wrapping the contacts block must NOT demote; only a
+// call-tracking node nested INSIDE the contacts region does (see
+// isCallTrackingDemoted).
+const callTrackingSelectors = "[class*=calltrack], [class*=calltouch], [class*=comagic], [class*=mango], .b24-widget, [class*=callibri], [class*=uiscom]"
 
 // ExtractSiteContacts parses already-fetched HTML for the venue's own contact
 // facts via the DOM. It performs ZERO network I/O — it is a deterministic,
@@ -60,7 +70,7 @@ const widgetAncestorSelectors = "iframe, .widget, .b24-widget, [class*=calltrack
 // skipped, never returned.
 func ExtractSiteContacts(html string) SiteContacts {
 	var out SiteContacts
-	if strings.TrimSpace(html) == "" {
+	if html == "" {
 		return out
 	}
 
@@ -83,8 +93,8 @@ func ExtractSiteContacts(html string) SiteContacts {
 // telCandidate is one tel: href with its DOM classification.
 type telCandidate struct {
 	value    string // human-facing display value (link text or href digits)
-	contacts bool   // inside a contacts region
-	widget   bool   // inside an embedded third-party widget/iframe
+	contacts bool   // inside a contacts region (and not call-tracking-demoted)
+	demoted  bool   // inside a call-tracking widget nested below the contacts region
 }
 
 // bestTelPhone returns the highest-priority valid tel: phone and its region.
@@ -107,31 +117,63 @@ func bestTelPhone(doc *goquery.Document) (*string, string) {
 		if !ValidatePhone(display) {
 			return
 		}
+		demoted := isCallTrackingDemoted(s)
 		cands = append(cands, telCandidate{
-			value:    display,
-			contacts: s.Closest(contactsRegionSelectors).Length() > 0,
-			widget:   s.Closest(widgetAncestorSelectors).Length() > 0,
+			value: display,
+			// A contacts-region link counts as "contacts" only when it is not
+			// a call-tracking number nested inside that region.
+			contacts: !demoted && s.Closest(contactsRegionSelectors).Length() > 0,
+			demoted:  demoted,
 		})
 	})
 	if len(cands) == 0 {
 		return nil, ""
 	}
 
-	// 1. contacts-region, non-widget.
+	// 1. contacts-region, not call-tracking.
 	for i := range cands {
-		if cands[i].contacts && !cands[i].widget {
+		if cands[i].contacts {
 			return &cands[i].value, regionContacts
 		}
 	}
-	// 2. any non-widget tel: (body).
+	// 2. any non-demoted tel: (body or generic-widget-wrapped contacts).
 	for i := range cands {
-		if !cands[i].widget {
+		if !cands[i].demoted {
 			return &cands[i].value, regionOther
 		}
 	}
-	// 3. last resort: a widget tel: (still validated). Rare, but better than
-	// dropping the only number on a page that is all-widget.
+	// 3. last resort: only call-tracking tel: present. Still validated, but a
+	// known tracking number — surfaced as the weak "other" tier so it only
+	// ever fills a nil phone, never overrides structured data.
 	return &cands[0].value, regionOther
+}
+
+// isCallTrackingDemoted reports whether a tel: link should be demoted because
+// it sits inside a named call-tracking widget that is NOT merely a generic
+// wrapper around the contacts region. The rule: demote only when the nearest
+// call-tracking ancestor is nested inside (a descendant of) the nearest
+// contacts-region ancestor — i.e. the tracking node is inside the contacts
+// block, not the contacts block nested inside a tracking wrapper.
+//
+// Concretely: a header tel: inside <div id="bx-widget-area"> (Bitrix) or a
+// footer tel: inside <aside class="widget"> is NOT demoted (those generic
+// classes are excluded from callTrackingSelectors entirely). A tel: inside a
+// <div class="comagic-phone"> that itself sits in the footer IS demoted.
+func isCallTrackingDemoted(s *goquery.Selection) bool {
+	ct := s.Closest(callTrackingSelectors)
+	if ct.Length() == 0 {
+		return false
+	}
+	contacts := s.Closest(contactsRegionSelectors)
+	if contacts.Length() == 0 {
+		// Not in a contacts region at all — a tracking number in the body.
+		return true
+	}
+	// Both ancestors exist. Demote only if the call-tracking node is a
+	// descendant of (nested below) the contacts node. If the contacts node is
+	// instead nested below the tracking node, the tracking selector matched a
+	// generic wrapper and we must NOT demote the real contacts tel:.
+	return ct.Closest(contactsRegionSelectors).Length() > 0
 }
 
 // microdataPhone reads [itemprop=telephone] content/text.

@@ -24,21 +24,32 @@ func TestGoldenRegression_ExtractFacts(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name      string
-		fixture   string
-		wantPhone string // exact phone ExtractFacts must return ("" = expect nil)
-		wantAddr  string // substring the returned address must contain ("" = skip)
-		wantPrice string // substring the returned price must contain ("" = skip)
+		name         string
+		fixture      string
+		wantPhone    string // exact phone ExtractFacts must return ("" = expect nil)
+		wantNotPhone string // phone ExtractFacts must NOT return (the known-wrong value)
+		wantAddr     string // substring the returned address must contain ("" = skip)
+		wantPrice    string // substring the returned price must contain ("" = skip)
 	}{
 		{
-			name:      "igora_drive_contacts_tel_wins_over_widget_8800",
-			fixture:   "igora-drive.html",
-			wantPhone: "+7 (812) 615 70 00",
+			// Fixture carries a WRONG JSON-LD telephone (8-800 tracking number)
+			// and a demoted calltouch widget tel:; the correct number exists
+			// ONLY as the contacts-region tel: href. The old cascade returned
+			// the 8-800 — this case fails unless applyContactOverride wins.
+			name:         "igora_drive_contacts_tel_wins_over_jsonld_and_widget_8800",
+			fixture:      "igora-drive.html",
+			wantPhone:    "+7 (812) 615 70 00",
+			wantNotPhone: "+7 (800) 555-35-35",
 		},
 		{
-			name:      "royal_wedding_contacts_tel_beats_body_and_widget",
-			fixture:   "royal-wedding.html",
-			wantPhone: "+7 (812) 956-18-40",
+			// Representative fixture (site 443-refused at capture). Tests the
+			// structural rule address-block tel: > body tel: > widget tel:; the
+			// specific numbers are illustrative, not operator-verified ground
+			// truth.
+			name:         "royal_wedding_contacts_tel_beats_body_and_widget",
+			fixture:      "royal-wedding.html",
+			wantPhone:    "+7 (812) 956-18-40",
+			wantNotPhone: "+7 (812) 704-85-45",
 		},
 		{
 			name:      "vzaimno_site_address_litejnyj_12",
@@ -81,6 +92,9 @@ func TestGoldenRegression_ExtractFacts(t *testing.T) {
 				if *facts.Phone != tc.wantPhone {
 					t.Errorf("phone: want %q, got %q", tc.wantPhone, *facts.Phone)
 				}
+			}
+			if tc.wantNotPhone != "" && facts.Phone != nil && *facts.Phone == tc.wantNotPhone {
+				t.Errorf("phone: must NOT be the known-wrong %q", tc.wantNotPhone)
 			}
 
 			if tc.wantAddr != "" {
