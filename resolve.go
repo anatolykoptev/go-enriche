@@ -27,6 +27,7 @@ const (
 	sourceMaps                                // 2GIS / Yandex org card
 	sourceAggregator                          // (reserved) zoon/restoclub/afisha card
 	sourceOfficialSite                        // the venue's own site (tel: href / JSON-LD / regex)
+	sourcePoisonLock                          // DNI-poison "refuse" verdict — drops + locks the phone (see dropPhone)
 	sourceOperatorVerified                    // operator hand-verified — top authority, never overwritten
 )
 
@@ -39,12 +40,18 @@ const (
 	srcStrMaps             = "maps"
 	srcStrSearch           = "search"
 	srcStrUnknown          = "unknown"
+	srcStrPoisonLocked     = "poison_locked" // DNI omit — never serialized (phone is nil)
 )
 
 func (s fieldSource) String() string {
 	switch s {
 	case sourceOperatorVerified:
 		return srcStrOperatorVerified
+	case sourcePoisonLock:
+		// Internal "refuse" verdict for a DNI-poisoned phone. The field is dropped
+		// to nil, so this string is never serialized (snapshot only emits sources
+		// for present fields); mapped here only for completeness/telemetry.
+		return srcStrPoisonLocked
 	case sourceOfficialSite:
 		return srcStrOfficialSite
 	case sourceAggregator:
@@ -144,13 +151,40 @@ func (r *resolver) set(dst **string, owner *fieldProv, val string, src fieldSour
 		return
 	}
 	// Strictly lower source: fill the gap only (never overrides; the conflict,
-	// if any, was already counted above).
-	if *dst == nil {
+	// if any, was already counted above). A nil value whose owner is a HIGHER
+	// source is a deliberate verdict, not a vacancy — e.g. a DNI-poison drop
+	// (dropPhone locks the phone at sourcePoisonLock with a nil value). Such a
+	// locked field must NOT be refilled by a lower maps/search source, otherwise
+	// the rotating proxy this fix exists to omit would creep back in. Only fill
+	// when the field is genuinely unclaimed (owner == sourceNone).
+	if *dst == nil && owner.source == sourceNone {
 		v := val
 		*dst = &v
 		owner.source = src
 		owner.conf = confidenceFor(src)
 	}
+}
+
+// dropPhone records a DNI-poison "refuse" verdict for the phone: the official
+// site carries a call-tracking vendor and no DNI-immune number, so every
+// candidate is a rotating proxy. It drops any already-merged lower-priority
+// phone (the maps/search card phone, which is itself often the same tracking
+// number) and LOCKS the field at sourcePoisonLock so no later maps/search fill
+// can resurrect it. An operator-verified seed is sacrosanct: a hand-verified
+// phone outranks the poison verdict and is never dropped.
+func (r *resolver) dropPhone() {
+	if r.prov.phone.source == sourceOperatorVerified {
+		// Operator pin wins even on a DNI site — leave it untouched.
+		return
+	}
+	// Count a conflict when a real lower-priority phone is being refused, so the
+	// telemetry reflects that the resolver actively overrode a maps/search value.
+	if r.facts.Phone != nil {
+		r.m.conflict("phone")
+	}
+	r.facts.Phone = nil
+	r.prov.phone.source = sourcePoisonLock
+	r.prov.phone.conf = confLow
 }
 
 // seedOperatorValues injects operator-verified field values at the top
@@ -190,7 +224,15 @@ func (r *resolver) mergeOrg(od *maps.OrgData) {
 func (r *resolver) mergeSite(sf extract.Facts) {
 	r.set(&r.facts.PlaceName, &r.prov.placeName, derefStr(sf.PlaceName), sourceOfficialSite, "place_name")
 	r.set(&r.facts.Address, &r.prov.address, derefStr(sf.Address), sourceOfficialSite, "address")
-	r.set(&r.facts.Phone, &r.prov.phone, derefStr(sf.Phone), sourceOfficialSite, "phone")
+	// Phone: a DNI-poison verdict from the site (PhonePoisoned) is a first-class
+	// "refuse" that drops + locks the phone (outranking any maps/search value,
+	// never an operator seed). Otherwise merge the site phone normally. The two
+	// are mutually exclusive — a poisoned site always carries a nil Phone.
+	if sf.PhonePoisoned {
+		r.dropPhone()
+	} else {
+		r.set(&r.facts.Phone, &r.prov.phone, derefStr(sf.Phone), sourceOfficialSite, "phone")
+	}
 	r.set(&r.facts.Website, &r.prov.website, derefStr(sf.Website), sourceOfficialSite, "website")
 	r.set(&r.facts.Hours, &r.prov.hours, derefStr(sf.Hours), sourceOfficialSite, "hours")
 	r.set(&r.facts.Price, &r.prov.price, derefStr(sf.Price), sourceOfficialSite, "price")
