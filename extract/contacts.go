@@ -1,6 +1,7 @@
 package extract
 
 import (
+	"net/url"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -98,7 +99,7 @@ const callTrackingSelectors = "[class*=calltrack], [class*=calltouch], [class*=c
 //
 // Telegram t.me/<handle> carries a handle, not a number, so it is not a phone
 // source on its own; only wa.me / api.whatsapp.com/send?phone= yield a number.
-const socialLinkSelectors = `a[href*="wa.me/"], a[href*="api.whatsapp.com/send"], a[href*="whatsapp.com/send"]`
+const socialLinkSelectors = `a[href*="wa.me/"], a[href*="api.whatsapp.com/send"]`
 
 // ExtractSiteContacts parses already-fetched HTML for the venue's own contact
 // facts via the DOM. It performs ZERO network I/O — it is a deterministic,
@@ -369,37 +370,56 @@ func socialLinkCandidates(doc *goquery.Document) []phoneCandidate {
 	return out
 }
 
-// socialLinkPhone extracts the bare phone digits from a WhatsApp href and
-// formats them as a "+<digits>" string ValidatePhone/phoneAreaCode can parse.
-// Handles wa.me/79219561840, api.whatsapp.com/send?phone=79219561840, and the
-// 8-prefixed and country-bare variants. Returns "" when no plausible RU number
-// is present.
+// socialLinkPhone extracts the phone digits from a WhatsApp href and returns
+// them as a "+<digits>" string ValidatePhone/phoneAreaCode can parse. It
+// isolates the value-bearing segment (the phone= query value, or the wa.me
+// path segment), then strips ALL non-digits within that segment so a number
+// written with separators or a URL-encoded "+" still parses:
+//
+//	api.whatsapp.com/send?phone=79219561840        -> +79219561840
+//	api.whatsapp.com/send?phone=7-921-956-18-40    -> +79219561840
+//	api.whatsapp.com/send?phone=%2B79219561840     -> +79219561840
+//	wa.me/79219561840 (and wa.me/7 921 956 18 40)  -> +79219561840
+//
+// ValidatePhone (length/area-code gate) is the sole arbiter of validity — this
+// function never truncates a candidate by guessing where the number ends. It
+// returns "" only when the segment holds no digits at all. Cutting at the first
+// non-digit (the previous behavior) silently dropped any formatted number and
+// fell back to the rotating DNI tel:, re-opening the anti-fab hole this layer
+// closes — hence the all-non-digit strip.
 func socialLinkPhone(href string) string {
-	raw := href
-	// api.whatsapp.com/send?phone=NNN — take the phone query value.
-	if i := strings.Index(raw, "phone="); i >= 0 {
-		raw = raw[i+len("phone="):]
-	} else if i := strings.Index(raw, "wa.me/"); i >= 0 {
-		// wa.me/NNN — take the path segment.
-		raw = raw[i+len("wa.me/"):]
+	seg := href
+	// Prefer the phone= query value; scope the lookup to the query string so a
+	// stray "phone=" earlier in the path/host cannot latch. Fall back to the
+	// wa.me/<digits> path segment.
+	query := href
+	if q := strings.IndexByte(href, '?'); q >= 0 {
+		query = href[q+1:]
 	}
-	// Cut at the first non-number boundary (&, ?, /, #, quote).
-	for j := 0; j < len(raw); j++ {
-		c := raw[j]
-		if c < '0' || c > '9' {
-			if c == '+' {
-				continue
-			}
-			raw = raw[:j]
-			break
-		}
+	if i := strings.Index(query, "phone="); i >= 0 {
+		seg = query[i+len("phone="):]
+	} else if i := strings.Index(href, "wa.me/"); i >= 0 {
+		seg = href[i+len("wa.me/"):]
+	} else {
+		return ""
 	}
-	digits := reDigitsOnly.ReplaceAllString(raw, "")
+	// End the value at the first URL segment/param separator. Internal
+	// separators (-, space, %2B etc.) are kept here and stripped below, so a
+	// formatted number is preserved, not truncated.
+	if j := strings.IndexAny(seg, "&#?/\\\"' \t\n"); j >= 0 {
+		seg = seg[:j]
+	}
+	// URL-decode so a percent-encoded "+" (%2B) or space (%20) does not leak a
+	// stray digit through the non-digit strip below.
+	if dec, err := url.QueryUnescape(seg); err == nil {
+		seg = dec
+	}
+	digits := reDigitsOnly.ReplaceAllString(seg, "")
 	if len(digits) == 0 {
 		return ""
 	}
-	// Normalize to a leading "+" so ValidatePhone's digit parse and
-	// phoneAreaCode (which expect a leading 7/8) see a well-formed number.
+	// Leading "+" so ValidatePhone's digit parse and phoneAreaCode (which expect
+	// a leading 7/8) see a well-formed number.
 	return "+" + digits
 }
 
@@ -499,6 +519,14 @@ func isTollFree(areaCode int) bool {
 
 // regionForTier maps a candidate tier back to the region label
 // applyContactOverride branches on.
+//
+// INVARIANT (load-bearing): tierSocialLink MUST map to an override-class region
+// (regionContacts or regionMicrodata), never regionOther. A social-link number
+// is the venue's mobile/social line whose area code (e.g. 921) does NOT match
+// the article city's landline code (e.g. 812), so it bypasses the matchesCity
+// override branch in applyContactOverride and reaches facts.Phone ONLY via the
+// override switch arm keyed on this region. If it were regionOther it would
+// silently degrade to fill-if-nil and the DNI rotating-proxy bug would return.
 func regionForTier(tier int) string {
 	switch tier {
 	case tierSocialLink, tierContacts:

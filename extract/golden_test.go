@@ -69,9 +69,13 @@ func TestGoldenRegression_ExtractFacts(t *testing.T) {
 			wantNotPhone: "+7 (812) 956-18-40",
 		},
 		{
-			// Same fixture, NO city hint: the social-link phone is the top
-			// authority independent of any city tiebreaker, so it still wins —
-			// the rotating (812) is never asserted regardless of city signal.
+			// Same fixture, NO city hint: the social-link phone is still chosen
+			// (it is the highest tier), so the rotating (812) is never asserted
+			// regardless of city signal. NOTE: this case alone does NOT isolate
+			// the social-link PRE-CHECK in resolvePhoneForCity — with the city
+			// known and a local 812 present, the pre-check must beat the
+			// area-code tiebreaker; that is guarded by the SPb case above and by
+			// TestResolvePhoneForCity_SocialLinkBeatsLocalAreaCode.
 			name:         "royal_wed_no_city_social_link_still_wins",
 			fixture:      "royal-wed.html",
 			city:         "",

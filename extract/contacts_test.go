@@ -213,25 +213,6 @@ func TestApplyContactOverride_NoSocialLinkKeepsTel(t *testing.T) {
 	}
 }
 
-// socialLinkPhone unit coverage: both WhatsApp href shapes + the non-phone
-// Telegram handle (which must yield no number).
-func TestSocialLinkPhone(t *testing.T) {
-	t.Parallel()
-	cases := []struct{ in, want string }{
-		{"https://api.whatsapp.com/send?phone=79219561840", "+79219561840"},
-		{"https://api.whatsapp.com/send?phone=79219561840&text=hi", "+79219561840"},
-		{"https://wa.me/79219561840", "+79219561840"},
-		{"https://wa.me/79219561840?text=hello", "+79219561840"},
-		{"https://t.me/royal_wedding_spb", ""},
-		{"https://example.com/contacts", ""},
-	}
-	for _, c := range cases {
-		if got := socialLinkPhone(c.in); got != c.want {
-			t.Errorf("socialLinkPhone(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
 // A social-link 8-800 (unheard of, but guard it) must be demoted, not treated
 // as the top authority — toll-free is never a venue's owned local line.
 func TestSocialLink_TollFreeStillDemoted(t *testing.T) {

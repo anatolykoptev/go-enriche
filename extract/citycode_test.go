@@ -163,3 +163,59 @@ func TestResolvePhoneForCity_TollFreeDemoted(t *testing.T) {
 		}
 	}
 }
+
+
+// The genuine guard for the social-link PRE-CHECK in resolvePhoneForCity: with
+// a known city AND a city-local (812) candidate present, the area-code
+// tiebreaker WOULD pick the local 812 — but the social-link pre-check runs
+// first and must win, because the (812) is a DNI rotating proxy and the social
+// link is the stable owned number. Removing the pre-check makes this fail
+// (the area-code rule returns the 812), unlike the no-city golden case where
+// the fallback tier loop selects the top tier regardless.
+func TestResolvePhoneForCity_SocialLinkBeatsLocalAreaCode(t *testing.T) {
+	t.Parallel()
+	html := `<html><body>
+	<header class="header">
+	  <a href="tel:+78129561840">+7 (812) 956-18-40</a>
+	  <a href="https://api.whatsapp.com/send?phone=79219561840">WhatsApp</a>
+	</header>
+	<div itemscope><meta itemprop="telephone" content="+7 (812) 956-18-40"><meta itemprop="address" content="г. Санкт-Петербург"></div>
+	</body></html>`
+	doc, err := documentFromHTML(html)
+	if err != nil || doc == nil {
+		t.Fatalf("doc parse: %v", err)
+	}
+	phone, _, ok := resolvePhoneForCity(doc, "Санкт-Петербург")
+	if !ok {
+		t.Fatal("want a resolved phone")
+	}
+	if phone != "+79219561840" {
+		t.Errorf("social-link pre-check must beat the local 812 area-code pick; want +79219561840, got %q", phone)
+	}
+}
+
+// socialLinkPhone must parse a FORMATTED WhatsApp number (separators /
+// URL-encoded +), not truncate at the first non-digit — truncation silently
+// dropped the candidate and fell back to the rotating DNI tel: (PR #13 review
+// MAJOR 1).
+func TestSocialLinkPhone_FormattedVariants(t *testing.T) {
+	t.Parallel()
+	cases := []struct{ in, want string }{
+		{"https://api.whatsapp.com/send?phone=79219561840", "+79219561840"},
+		{"https://api.whatsapp.com/send?phone=7-921-956-18-40", "+79219561840"},
+		{"https://api.whatsapp.com/send?phone=%2B79219561840", "+79219561840"},
+		{"https://api.whatsapp.com/send?phone=79219561840&text=hi", "+79219561840"},
+		{"https://wa.me/79219561840", "+79219561840"},
+		{"https://wa.me/79219561840?text=hello", "+79219561840"},
+		// phone= only honored inside the query string, not the path/host.
+		{"https://example.com/phone=garbage/send", ""},
+		// Telegram handle / group invite carry no number.
+		{"https://t.me/royal_wedding_spb", ""},
+		{"https://chat.whatsapp.com/AbCdEf123", ""},
+	}
+	for _, c := range cases {
+		if got := socialLinkPhone(c.in); got != c.want {
+			t.Errorf("socialLinkPhone(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
