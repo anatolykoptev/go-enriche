@@ -64,6 +64,15 @@ func New(opts ...Option) *Enricher {
 
 // Enrich enriches a single item: fetch, extract, search, cache.
 // Returns a partial result on failures (graceful degradation).
+//
+// Source-priority ordering (the official-site-first invariant): all contact
+// facts flow through one resolver whose precedence is
+// official_site > aggregator > maps > search. The maps card fills facts as a
+// LOWER-priority fallback; the official site is ALWAYS fetched (even when maps
+// reports the venue closed) and its values OVERRIDE the maps card on conflict.
+// A reachable, active site also refutes a maps-only "closed" status. This
+// collapses the former two independent fact writers (the maps merge and the
+// wholesale site-extraction assign) into a single authority — see resolve.go.
 func (e *Enricher) Enrich(ctx context.Context, item Item) (*Result, error) {
 	result := &Result{
 		Name: item.Name,
@@ -86,30 +95,48 @@ func (e *Enricher) Enrich(ctx context.Context, item Item) (*Result, error) {
 	// (events, places with no URL, places with transient 2GIS errors) preserves them.
 	seedSourceCoords(item, &result.Facts)
 
-	// Maps status check (places only) — short-circuit if permanently closed.
-	if e.checkMapsStatus(ctx, item, result) {
-		if e.search != nil {
-			e.doSearch(ctx, item, result)
-		}
-		if e.cache != nil {
-			e.cache.Set(ctx, cacheKey(item), result, e.cacheTTL)
-		}
-		return result, nil
+	// One resolver owns every fact write for this call. The maps merge and the
+	// site extraction both feed it; it enforces official_site > maps precedence.
+	r := &resolver{facts: &result.Facts, prov: &factProvenance{}, m: e.metrics}
+
+	// Maps status check (places only). Fills facts at sourceMaps (lower
+	// priority) and returns a CANDIDATE closed-status — it no longer
+	// short-circuits before the official site is consulted. An empty status
+	// means "not reported closed".
+	mapsClosedStatus := e.checkMapsStatus(ctx, item, result, r)
+
+	// Fetch + extract the official site. ALWAYS run when a URL is present,
+	// including the maps-closed case: the site's own tel:/contacts are the
+	// authority, and a live site refutes a stale maps "closed". Merged at
+	// sourceOfficialSite (overrides maps on conflict).
+	siteFetched := false
+	if item.URL != "" {
+		e.fetchAndExtract(ctx, item, result, r)
+		siteFetched = true
 	}
 
-	// Fetch + extract.
-	if item.URL != "" {
-		e.fetchAndExtract(ctx, item, result)
-	}
+	// Reconcile closed-status against the official site (false-closed class).
+	// closedStands is true when maps reported the venue closed and the official
+	// site did NOT refute it (no/unreachable/down site) — the closed verdict is
+	// final and a lower-authority source must not overturn it.
+	closedStands := e.reconcileClosedStatus(ctx, item, result, mapsClosedStatus, siteFetched)
 
 	// Search.
 	if e.search != nil {
-		e.doSearch(ctx, item, result)
+		e.doSearch(ctx, item, result, r)
 	}
 
 	// When no primary URL, fetch top search source URLs for content + facts.
+	// A search-discovered third-party page is NOT authority to refute a maps
+	// closed-status, so its Status upgrade is suppressed when closedStands —
+	// only a reachable, active official site may resurrect a closed venue.
 	if item.URL == "" && result.Content == "" {
-		e.fetchSearchSources(ctx, item, result)
+		e.fetchSearchSources(ctx, item, result, r, closedStands)
+	}
+
+	// Phone-source telemetry: report the winning phone's provenance once.
+	if item.Mode == ModePlaces {
+		e.metrics.phoneSource(r.phoneSource())
 	}
 
 	// Cache store.
@@ -120,6 +147,34 @@ func (e *Enricher) Enrich(ctx context.Context, item Item) (*Result, error) {
 	e.logger.DebugContext(ctx, "enriche: done", "name", item.Name, "status", result.Status)
 
 	return result, nil
+}
+
+// reconcileClosedStatus decides the final Status when maps flagged the venue
+// closed. mapsClosedStatus is the candidate verdict (StatusClosed /
+// StatusTemporaryClosed, or "" when maps did not flag closed). The official
+// site, if reachable and active, refutes a maps-only closed verdict (the
+// false-closed class: a wrong Yandex/2GIS card marks an operating venue
+// closed). When the site is NOT active (or no site exists), the maps
+// closed-status stands.
+//
+// Returns true when the closed verdict STANDS (final) — the caller must then
+// suppress any lower-authority Status upgrade (e.g. the search fallback), since
+// only a reachable, active official site may resurrect a closed venue.
+func (e *Enricher) reconcileClosedStatus(ctx context.Context, item Item, result *Result, mapsClosedStatus fetch.PageStatus, siteFetched bool) bool {
+	if mapsClosedStatus == "" {
+		return false
+	}
+	if siteFetched && siteRefutesClosed(result.Status) {
+		// result.Status already holds the site's StatusActive from fetchAndExtract.
+		e.logger.InfoContext(ctx, "enriche: live official site refutes maps closed-status",
+			"name", item.Name, "status", result.Status)
+		return false
+	}
+	// Site absent / unreachable / down — keep the maps closed verdict.
+	result.Status = mapsClosedStatus
+	e.logger.InfoContext(ctx, "enriche: maps closed-status stands (site not active)",
+		"name", item.Name, "status", result.Status)
+	return true
 }
 
 // EnrichBatch enriches multiple items concurrently with bounded concurrency.
@@ -142,53 +197,42 @@ func (e *Enricher) EnrichBatch(ctx context.Context, items []Item) []*Result {
 }
 
 // checkMapsStatus queries the maps checker for place closure status.
-// Only runs for ModePlaces. Returns true if the place is permanently or
-// temporarily closed (short-circuits enrichment with the appropriate status).
-// When OrgData is available, merges business data into facts (fill-nil-only).
-func (e *Enricher) checkMapsStatus(ctx context.Context, item Item, result *Result) bool {
+// Only runs for ModePlaces. Returns the candidate closed-status
+// (StatusClosed / StatusTemporaryClosed) when the place is reported closed on
+// maps, or "" otherwise — but DOES NOT short-circuit: the official site is
+// still fetched afterward (resolver enforces site-over-maps, and a live site
+// can refute the closed verdict). When OrgData is available, merges business
+// data into facts at sourceMaps via the resolver.
+func (e *Enricher) checkMapsStatus(ctx context.Context, item Item, _ *Result, r *resolver) fetch.PageStatus {
 	if e.mapsChecker == nil || item.Mode != ModePlaces {
-		return false
+		return ""
 	}
 	cr, err := e.mapsChecker.Check(ctx, item.Name, item.City, item.Address)
 	if err != nil {
 		e.logger.DebugContext(ctx, "enriche: maps check failed", "name", item.Name, "err", err)
 		e.metrics.mapsCheckError()
-		return false
+		return ""
 	}
 
-	// Merge business data from maps (fill-nil-only).
+	// Merge business data from maps at sourceMaps (lower priority — the official
+	// site overrides on conflict).
 	if cr.OrgData != nil {
-		mergeOrgDataToFacts(cr.OrgData, &result.Facts)
+		r.mergeOrg(cr.OrgData)
 		e.logger.DebugContext(ctx, "enriche: merged maps org data",
 			"name", item.Name, "org_name", cr.OrgData.Name)
 	}
 
 	if cr.IsClosed() {
-		result.Status = fetch.StatusClosed
-		e.logger.InfoContext(ctx, "enriche: place permanently closed on maps",
+		e.logger.InfoContext(ctx, "enriche: place reported permanently closed on maps",
 			"name", item.Name, "map_url", cr.MapURL)
-		return true
+		return fetch.StatusClosed
 	}
 	if cr.IsTemporaryClosed() {
-		result.Status = fetch.StatusTemporaryClosed
-		e.logger.InfoContext(ctx, "enriche: place temporarily closed on maps",
+		e.logger.InfoContext(ctx, "enriche: place reported temporarily closed on maps",
 			"name", item.Name, "map_url", cr.MapURL)
-		return true
+		return fetch.StatusTemporaryClosed
 	}
-	return false
-}
-
-// mergeOrgDataToFacts copies maps business data into facts (fill-nil-only).
-func mergeOrgDataToFacts(od *maps.OrgData, facts *Facts) {
-	setFactIfNil(&facts.PlaceName, od.Name)
-	setFactIfNil(&facts.Address, od.Address)
-	setFactIfNil(&facts.Phone, od.Phone)
-	setFactIfNil(&facts.Website, od.Website)
-	setFactIfNil(&facts.Hours, od.Hours)
-	if od.Latitude != 0 && facts.Latitude == nil {
-		facts.Latitude = &od.Latitude
-		facts.Longitude = &od.Longitude
-	}
+	return ""
 }
 
 // seedSourceCoords writes item.Latitude/Longitude into facts when the item
@@ -205,14 +249,7 @@ func seedSourceCoords(item Item, facts *Facts) {
 	facts.Longitude = item.Longitude
 }
 
-// setFactIfNil sets *dst to &src if *dst is nil and src is non-empty.
-func setFactIfNil(dst **string, src string) {
-	if *dst == nil && src != "" {
-		*dst = &src
-	}
-}
-
-func (e *Enricher) doSearch(ctx context.Context, item Item, result *Result) {
+func (e *Enricher) doSearch(ctx context.Context, item Item, result *Result, r *resolver) {
 	query, timeRange := search.BuildQuery(int(item.Mode), item.Name, item.City)
 	sr, err := e.search.Search(ctx, query, timeRange)
 	if err != nil || sr == nil {
@@ -227,8 +264,9 @@ func (e *Enricher) doSearch(ctx context.Context, item Item, result *Result) {
 	result.SearchContext = sr.Context
 	result.SearchSources = sr.Sources
 
-	// Extract facts from search snippets (fills nil fields only).
-	extract.ExtractSnippetFacts(sr.Context, &result.Facts)
+	// Extract facts from search snippets at sourceSearch (lowest priority —
+	// fills nil fields only, never overrides site/maps).
+	r.mergeSnippet(sr.Context)
 }
 
 // Search exposes the configured search provider for direct queries.

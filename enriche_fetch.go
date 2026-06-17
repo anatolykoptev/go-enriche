@@ -11,7 +11,7 @@ import (
 	"github.com/anatolykoptev/go-enriche/fetch"
 )
 
-func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Result) { //nolint:gocognit,cyclop,funlen // pre-existing fetch/extract/fallback orchestration complexity; this change adds only a straight-line source-coord re-seed
+func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Result, r *resolver) { //nolint:gocognit,cyclop,funlen // pre-existing fetch/extract/fallback orchestration complexity; this change adds only a straight-line source-coord re-seed
 	// Start ox-browser readability in parallel (if configured).
 	type oxResult struct {
 		content string
@@ -112,15 +112,22 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 		}
 	}
 
-	// Extract structured facts (wholesale struct assignment — overwrites Facts).
-	result.Facts = extract.ExtractFactsForCity(html, item.URL, item.City)
+	// Extract structured facts from the official site, then MERGE them through
+	// the source-priority resolver at sourceOfficialSite — site values override
+	// any maps/search value on conflict, while maps fills only what the site
+	// left empty. This replaces the former wholesale `result.Facts = ...` assign
+	// that clobbered the maps merge (and, depending on order, could drop the
+	// site value entirely). The resolver, not assignment order, decides winners.
+	siteFacts := extract.ExtractFactsForCity(html, item.URL, item.City)
+	if siteHasAnyFact(siteFacts) {
+		e.metrics.siteResolved()
+	}
+	r.mergeSite(siteFacts)
 
-	// Re-seed source-provided coordinates: extract.ExtractFacts resets Facts to
-	// a zero-value struct (it never reads Latitude/Longitude from page markup),
-	// so the up-front seed applied in Enrich is lost. Re-applying here restores
-	// source-authoritative coords. This also future-proofs against a potential
-	// schema.org Place.geo extraction being added to ExtractFacts later.
-	seedSourceCoords(item, &result.Facts)
+	// Source-provided coordinates are owned by seedSourceCoords (applied at the
+	// top of Enrich); the resolver's mergeSite never touches coords, so the
+	// up-front seed survives — no re-seed needed now that Facts is no longer
+	// reset by a wholesale assign.
 
 	// OG image fallback.
 	if result.Image == nil {
