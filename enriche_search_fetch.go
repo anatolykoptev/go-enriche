@@ -2,9 +2,9 @@ package enriche
 
 import (
 	"context"
+	"golang.org/x/sync/errgroup"
 	"net/url"
 	"strings"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/anatolykoptev/go-enriche/extract"
 )
@@ -23,7 +23,7 @@ func (e *Enricher) fetchSearchSources(ctx context.Context, item Item, result *Re
 	e.logger.DebugContext(ctx, "enriche: fetching search sources",
 		"name", item.Name, "count", len(sources))
 
-	contents, fetchedAny := e.fetchAndExtractSources(ctx, sources, result)
+	contents, fetchedAny := e.fetchAndExtractSources(ctx, sources, item.City, result)
 
 	if len(contents) > 0 {
 		joined := strings.Join(contents, "\n\n---\n\n")
@@ -64,7 +64,7 @@ type sourceResult struct {
 // fetchAndExtractSources fetches URLs in parallel, extracts text and facts.
 // Results are assembled in original order to keep content deterministic.
 func (e *Enricher) fetchAndExtractSources(
-	ctx context.Context, sources []string, result *Result,
+	ctx context.Context, sources []string, city string, result *Result,
 ) ([]string, bool) {
 	results := make([]sourceResult, len(sources))
 
@@ -73,7 +73,7 @@ func (e *Enricher) fetchAndExtractSources(
 
 	for i, srcURL := range sources {
 		g.Go(func() error {
-			results[i] = e.fetchOneSource(gctx, srcURL)
+			results[i] = e.fetchOneSource(gctx, srcURL, city)
 			return nil
 		})
 	}
@@ -104,7 +104,7 @@ func (e *Enricher) fetchAndExtractSources(
 
 // fetchOneSource fetches a single URL and extracts content + facts.
 // Uses ox-browser readability as fallback when go-stealth fetch fails or yields thin content.
-func (e *Enricher) fetchOneSource(ctx context.Context, srcURL string) sourceResult {
+func (e *Enricher) fetchOneSource(ctx context.Context, srcURL, city string) sourceResult {
 	// Start ox-browser in parallel if available.
 	type oxOut struct {
 		content string
@@ -135,7 +135,7 @@ func (e *Enricher) fetchOneSource(ctx context.Context, srcURL string) sourceResu
 			sr.content = tr.Content
 			sr.image = tr.Image
 		}
-		sr.facts = extract.ExtractFacts(fr.HTML, srcURL)
+		sr.facts = extract.ExtractFactsForCity(fr.HTML, srcURL, city)
 	}
 
 	// Merge ox-browser: use if longer.
