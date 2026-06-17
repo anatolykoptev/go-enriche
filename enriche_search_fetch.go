@@ -14,7 +14,7 @@ const defaultSearchFetchLimit = 5
 // fetchSearchSources fetches top N URLs from search results when the item has
 // no primary URL. Extracts text content and structured facts from each page,
 // merging everything into the result (fill-nil-only for facts, concatenate content).
-func (e *Enricher) fetchSearchSources(ctx context.Context, item Item, result *Result) {
+func (e *Enricher) fetchSearchSources(ctx context.Context, item Item, result *Result, r *resolver) {
 	sources := e.searchSourcesToFetch(result)
 	if len(sources) == 0 {
 		return
@@ -23,7 +23,7 @@ func (e *Enricher) fetchSearchSources(ctx context.Context, item Item, result *Re
 	e.logger.DebugContext(ctx, "enriche: fetching search sources",
 		"name", item.Name, "count", len(sources))
 
-	contents, fetchedAny := e.fetchAndExtractSources(ctx, sources, item.City, result)
+	contents, fetchedAny := e.fetchAndExtractSources(ctx, sources, item.City, result, r)
 
 	if len(contents) > 0 {
 		joined := strings.Join(contents, "\n\n---\n\n")
@@ -64,7 +64,7 @@ type sourceResult struct {
 // fetchAndExtractSources fetches URLs in parallel, extracts text and facts.
 // Results are assembled in original order to keep content deterministic.
 func (e *Enricher) fetchAndExtractSources(
-	ctx context.Context, sources []string, city string, result *Result,
+	ctx context.Context, sources []string, city string, result *Result, r *resolver,
 ) ([]string, bool) {
 	results := make([]sourceResult, len(sources))
 
@@ -92,7 +92,10 @@ func (e *Enricher) fetchAndExtractSources(
 		if sr.content != "" {
 			contents = append(contents, sr.content)
 		}
-		mergeFacts(sr.facts, &result.Facts)
+		// Search-discovered pages are NOT the venue's own site — fold their facts
+		// in at sourceSearch (lowest priority): fill-only, never override a
+		// maps/official-site value.
+		r.mergeSearchFacts(sr.facts)
 		if result.Image == nil && sr.image != "" {
 			img := sr.image
 			result.Image = &img
@@ -146,27 +149,4 @@ func (e *Enricher) fetchOneSource(ctx context.Context, srcURL, city string) sour
 	}
 
 	return sr
-}
-
-// mergeFacts copies non-nil fields from src into dst (fill-nil-only).
-func mergeFacts(src extract.Facts, dst *extract.Facts) {
-	mergeFactPtr(&dst.PlaceName, src.PlaceName)
-	mergeFactPtr(&dst.PlaceType, src.PlaceType)
-	mergeFactPtr(&dst.Address, src.Address)
-	mergeFactPtr(&dst.Phone, src.Phone)
-	mergeFactPtr(&dst.Price, src.Price)
-	mergeFactPtr(&dst.Website, src.Website)
-	mergeFactPtr(&dst.Hours, src.Hours)
-	mergeFactPtr(&dst.EventDate, src.EventDate)
-	if src.Latitude != nil && dst.Latitude == nil {
-		dst.Latitude = src.Latitude
-		dst.Longitude = src.Longitude
-	}
-}
-
-// mergeFactPtr sets *dst to src if *dst is nil and src is non-nil.
-func mergeFactPtr(dst **string, src *string) {
-	if *dst == nil && src != nil {
-		*dst = src
-	}
 }
