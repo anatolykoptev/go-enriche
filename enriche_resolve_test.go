@@ -57,13 +57,6 @@ func newCountingMetrics() (*countingMetrics, *Metrics) {
 	return c, m
 }
 
-func derefStr(p *string) string {
-	if p == nil {
-		return ""
-	}
-	return *p
-}
-
 // searchResult builds a search.SearchResult with the given context + source URLs.
 func searchResult(ctx string, sources []string) search.SearchResult {
 	return search.SearchResult{Context: ctx, Sources: sources}
@@ -365,8 +358,8 @@ func TestResolver_OrderIndependence(t *testing.T) {
 	if derefStr(fA.Phone) != sitePhone || derefStr(fB.Phone) != sitePhone {
 		t.Errorf("order-dependence: A=%q B=%q, both want %q", derefStr(fA.Phone), derefStr(fB.Phone), sitePhone)
 	}
-	if rA.prov.phone != sourceOfficialSite || rB.prov.phone != sourceOfficialSite {
-		t.Errorf("owner not official_site: A=%v B=%v", rA.prov.phone, rB.prov.phone)
+	if rA.prov.phone.source != sourceOfficialSite || rB.prov.phone.source != sourceOfficialSite {
+		t.Errorf("owner not official_site: A=%v B=%v", rA.prov.phone.source, rB.prov.phone.source)
 	}
 	// Conflict COUNT is also order-independent: both orders adjudicated exactly
 	// one site-vs-maps phone conflict (PR-review LOW finding).

@@ -458,9 +458,9 @@ func TestCacheKey(t *testing.T) {
 		item Item
 		want string
 	}{
-		{Item{URL: "https://example.com"}, "enriche:https://example.com"},
-		{Item{Name: "Test"}, "enriche:search:Test"},
-		{Item{Name: "Place", URL: "https://place.com"}, "enriche:https://place.com"},
+		{Item{URL: "https://example.com"}, "enriche:v2:https://example.com:seed:none"},
+		{Item{Name: "Test"}, "enriche:search:v2:Test:seed:none"},
+		{Item{Name: "Place", URL: "https://place.com"}, "enriche:v2:https://place.com:seed:none"},
 	}
 	for _, tt := range tests {
 		got := cacheKey(tt.item)
