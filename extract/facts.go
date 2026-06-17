@@ -101,7 +101,15 @@ func applyContactOverride(html, city string, facts *Facts) {
 	// overrides any prior phone unconditionally. Otherwise the result is the
 	// source-order pick (contacts tel: > body tel: > microdata/og:), which
 	// keeps its override-vs-fill semantics below.
-	phone, region, ok := resolvePhoneForCity(doc, city, prior...)
+	phone, region, ok, dniOmit := resolvePhoneForCityDNI(doc, city, prior...)
+	if dniOmit {
+		// A DNI/call-tracking vendor is present and no DNI-immune source exists:
+		// every injected tel:/microdata candidate is a rotating proxy. Omit the
+		// phone entirely — including any Layer-1/2 value, which the vendor can
+		// rewrite — so the agent shows «уточняйте» rather than a rotating number.
+		facts.Phone = nil
+		return
+	}
 	if !ok {
 		return
 	}

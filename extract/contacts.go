@@ -459,56 +459,93 @@ func ogPhoneCandidates(doc *goquery.Document) []phoneCandidate {
 // when there is no valid candidate. region is "contacts"/"microdata"/"other"
 // so the caller (applyContactOverride) keeps its override-vs-fill semantics.
 func resolvePhoneForCity(doc *goquery.Document, city string, prior ...string) (string, string, bool) {
+	phone, region, ok, _ := resolvePhoneForCityDNI(doc, city, prior...)
+	return phone, region, ok
+}
+
+// resolvePhoneForCityDNI is resolvePhoneForCity plus a DNI-omit signal. When a
+// call-tracking / dynamic-number-insertion vendor (Roistat/Calltouch/Comagic/
+// Mango/Callibri/UIS) is detected on the page, an injected tel:/microdata phone
+// is a rotating proxy, not the venue's own line. In that case ONLY a DNI-immune
+// social-link phone (tierSocialLink) may be returned; if none exists the result
+// is dniOmit=true and no phone, so the caller omits the field («уточняйте»)
+// rather than asserting a rotating proxy. A clean (non-DNI) page is unaffected.
+func resolvePhoneForCityDNI(doc *goquery.Document, city string, prior ...string) (phone, region string, ok, dniOmit bool) {
 	cands := collectPhoneCandidates(doc, prior...)
 	if len(cands) == 0 {
-		return "", "", false
+		return "", "", false, false
 	}
 
-	// Top authority: a hard-coded social-link phone (tierSocialLink, from a
-	// wa.me / api.whatsapp.com href). It is the agency's owned number embedded
-	// in the markup and is immune to call-tracking DNI rotation, so it wins
-	// UNCONDITIONALLY — before the local-area-code tiebreaker. This is what
-	// makes a DNI venue (e.g. royal-wed.ru, whose visible (812) tel: rotates
-	// via Roistat) resolve to its stable WhatsApp number instead of a rotating
-	// proxy. The area-code rule only disambiguates among injected/rotating
-	// candidates; the social link bypasses it (a city's mobile/social number
-	// is not expected to carry the city's landline area code).
+	if _, dni := detectDNIVendor(doc); dni {
+		// Only a hard-coded social-link phone survives DNI rotation. If one
+		// exists, it is the authoritative phone; otherwise omit (the injected
+		// tel:/microdata candidates are all untrustworthy rotating proxies).
+		if i := socialLinkIndex(cands); i >= 0 {
+			return cands[i].value, regionForTier(cands[i].tier), true, false
+		}
+		return "", "", false, true
+	}
+
+	p, r := pickPhoneCandidate(cands, city)
+	return p, r, true, false
+}
+
+// socialLinkIndex returns the index of the first tierSocialLink candidate, or
+// -1 when none is present. A hard-coded social-link phone (wa.me /
+// api.whatsapp.com) is the only DNI-immune phone source.
+func socialLinkIndex(cands []phoneCandidate) int {
 	for i := range cands {
 		if cands[i].tier == tierSocialLink {
-			return cands[i].value, regionForTier(cands[i].tier), true
+			return i
 		}
 	}
+	return -1
+}
 
-	// Local-area-code tiebreaker: if the city is known and any candidate is
-	// local, choose the highest-tier local candidate. This is what makes the
-	// SPb 812 microdata beat a Moscow 925 tel: href on a multi-city venue.
+// pickPhoneCandidate selects the best candidate on a clean (non-DNI) page:
+//  1. a hard-coded social-link phone (tierSocialLink) wins UNCONDITIONALLY —
+//     it is the agency's owned number, immune to DNI rotation, and beats the
+//     local-area-code tiebreaker (a mobile/social number need not carry the
+//     city's landline area code);
+//  2. else the highest-tier candidate local to the city (area-code rule), so
+//     SPb 812 microdata beats a Moscow 925 tel: on a multi-city venue;
+//  3. else source-order (tier) ranking — contacts tel: > body tel: >
+//     microdata/og: > demoted — the plain tel:-wins fallback.
+//
+// cands is guaranteed non-empty by the caller.
+func pickPhoneCandidate(cands []phoneCandidate, city string) (phone, region string) {
+	if i := socialLinkIndex(cands); i >= 0 {
+		return cands[i].value, regionForTier(cands[i].tier)
+	}
+
 	if expected := expectedAreaCodes(city); len(expected) > 0 {
-		best := -1
-		for i := range cands {
-			if !areaCodeMatches(cands[i].areaCode, expected) {
-				continue
-			}
-			if best < 0 || cands[i].tier > cands[best].tier {
-				best = i
-			}
-		}
-		if best >= 0 {
-			return cands[best].value, regionForTier(cands[best].tier), true
+		if i := bestLocalCandidate(cands, expected); i >= 0 {
+			return cands[i].value, regionForTier(cands[i].tier)
 		}
 	}
 
-	// Fallback: source-order (tier) ranking — contacts-region tel: > body
-	// tel: > microdata/og: > demoted (call-tracking / 8-800). The venue's own
-	// human-facing tel: outranks structured telephone data; this is the plain
-	// tel:-wins behavior used when there is no city signal or no local
-	// candidate exists.
 	best := 0
 	for i := range cands {
 		if cands[i].tier > cands[best].tier {
 			best = i
 		}
 	}
-	return cands[best].value, regionForTier(cands[best].tier), true
+	return cands[best].value, regionForTier(cands[best].tier)
+}
+
+// bestLocalCandidate returns the index of the highest-tier candidate whose area
+// code is local to the city, or -1 when none is local.
+func bestLocalCandidate(cands []phoneCandidate, expected []int) int {
+	best := -1
+	for i := range cands {
+		if !areaCodeMatches(cands[i].areaCode, expected) {
+			continue
+		}
+		if best < 0 || cands[i].tier > cands[best].tier {
+			best = i
+		}
+	}
+	return best
 }
 
 // isTollFree reports whether a 3-digit area code is in the 8-800 toll-free
