@@ -16,9 +16,11 @@ type Metrics struct {
 	// OnSiteResolved fires once per Enrich call where the official site was
 	// fetched and yielded at least one fact (enrich_site_resolved_total).
 	OnSiteResolved func()
-	// OnConflict fires when the source-priority resolver overrode a present,
-	// differing lower-source value with a higher-source one (e.g. the official
-	// site overriding a maps phone). field is the fact name
+	// OnConflict fires once per field-adjudication where two DIFFERENT-priority
+	// sources offered a genuinely DIFFERENT value — order-independently: both the
+	// override case (a higher source overrides a present, differing lower value)
+	// and the rejection case (a lower source is rejected because a higher source
+	// already owns a differing value). field is the fact name
 	// (enrich_conflict_total{field}).
 	OnConflict func(field string)
 }

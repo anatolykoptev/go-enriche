@@ -2,9 +2,10 @@ package enriche
 
 import (
 	"context"
-	"golang.org/x/sync/errgroup"
 	"net/url"
 	"strings"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/anatolykoptev/go-enriche/extract"
 )
