@@ -146,17 +146,19 @@ func TestResolvePhoneForCity_NoCityBodyTelBeatsMicrodata(t *testing.T) {
 // real body tel:. Guards the reviewer's 8-800-fallback finding.
 func TestResolvePhoneForCity_TollFreeDemoted(t *testing.T) {
 	t.Parallel()
-	// Body 8-800 tel: vs a microdata SPb number; SPb article -> 812 microdata
-	// wins on the local rule; even with no city the 8-800 is demoted below
-	// microdata so the microdata still wins.
+	// Body 8-800 tel: (tierBody) vs a NON-local (Moscow 495) microdata number
+	// (tierMicrodata). With the shipped body>microdata order the only reason
+	// the 495 microdata wins for city="" is that the 8-800 is demoted to
+	// tierDemoted — so this isolates the demotion as the sole cause and stays
+	// robust if the body/microdata tiers are ever reordered.
 	html := `<html><body>
 	<p><a href="tel:+78005553535">8 (800) 555-35-35</a></p>
-	<span itemprop="telephone">+7 (812) 244-55-66</span>
+	<span itemprop="telephone">+7 (495) 999-88-77</span>
 	</body></html>`
 	doc, _ := documentFromHTML(html)
-	for _, city := range []string{"Санкт-Петербург", ""} {
+	for _, city := range []string{"Москва", ""} {
 		phone, _, ok := resolvePhoneForCity(doc, city)
-		if !ok || phone != "+7 (812) 244-55-66" {
+		if !ok || phone != "+7 (495) 999-88-77" {
 			t.Errorf("city=%q: 8-800 must be demoted below the real number; got %q ok=%v", city, phone, ok)
 		}
 	}

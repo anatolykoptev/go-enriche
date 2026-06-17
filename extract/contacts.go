@@ -25,6 +25,12 @@ func documentFromHTML(html string) (*goquery.Document, error) {
 // the header/footer/<address>/contacts region over one inside an embedded
 // third-party booking widget/iframe — that widget-injected number is exactly
 // the wrong-phone vector this extraction layer exists to defeat.
+//
+// NOTE: ExtractSiteContacts itself ranks a contacts-region tel: first, then
+// any other tel:, then microdata (tel: outranks microdata — the venue's own
+// human-facing link is the strongest signal). The richer candidate-set
+// resolver (resolvePhoneForCity / collectPhoneCandidates) used by ExtractFacts
+// shares that ordering and adds the local-area-code tiebreaker.
 type SiteContacts struct {
 	// Phone is the best site-own phone: a contacts-region tel: href if present,
 	// else microdata telephone, else any other valid tel: href. nil if none
@@ -57,13 +63,10 @@ const (
 	tierContacts  = 3 // a tel: in the header/footer/address/contacts region
 )
 
-// tollFreeAreaCode is the 8-800 toll-free / call-tracking range. An 8-800 is
-// never a venue's local line for a city guide, so it is demoted in the
-// source-order fallback (it may still fill a still-nil phone, last).
-const (
-	tollFreeLo = 800
-	tollFreeHi = 800
-)
+// tollFreeAreaCode is the 8-800 toll-free / call-tracking area code. An 8-800
+// is never a venue's local line for a city guide, so any candidate with this
+// code is demoted to tierDemoted (it may still fill a still-nil phone, last).
+const tollFreeAreaCode = 800
 
 // contactsRegionSelectors mark DOM subtrees that are the venue's own contact
 // area. A tel: inside any of these outranks a tel: elsewhere on the page.
@@ -394,7 +397,7 @@ func resolvePhoneForCity(doc *goquery.Document, city string, prior ...string) (s
 // isTollFree reports whether a 3-digit area code is in the 8-800 toll-free
 // range — never a venue's local line for a city guide.
 func isTollFree(areaCode int) bool {
-	return areaCode >= tollFreeLo && areaCode <= tollFreeHi
+	return areaCode == tollFreeAreaCode
 }
 
 // regionForTier maps a candidate tier back to the region label
