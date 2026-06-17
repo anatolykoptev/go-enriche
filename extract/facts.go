@@ -27,6 +27,16 @@ type Facts struct {
 //     venue put on its own page is the highest-signal phone authority and
 //     outranks JSON-LD/microdata/regex — see applyContactOverride.
 func ExtractFacts(html, pageURL string) Facts {
+	return ExtractFactsForCity(html, pageURL, "")
+}
+
+// ExtractFactsForCity is ExtractFacts plus the article's target city, which
+// drives the local-area-code phone tiebreaker (operator Decision 2,
+// 2026-06-17): among all official-site phone candidates (tel: href + microdata)
+// the resolver prefers the one whose area code is local to the city, and only
+// falls back to source-order ranking when no candidate matches the city's area
+// code. An empty city disables the tiebreaker (identical to the old behavior).
+func ExtractFactsForCity(html, pageURL, city string) Facts {
 	var facts Facts
 
 	if html == "" {
@@ -47,8 +57,9 @@ func ExtractFacts(html, pageURL string) Facts {
 
 	// Layer 3: official-site contact override — a contacts-region tel: href is
 	// authoritative and overrides whatever Layer 1/2 produced; a body tel:
-	// only fills a still-nil phone.
-	applyContactOverride(html, &facts)
+	// only fills a still-nil phone. With a city hint, a candidate local to the
+	// city (any region) overrides — that is the local-area-code rule.
+	applyContactOverride(html, city, &facts)
 
 	return facts
 }
@@ -70,19 +81,47 @@ func ExtractFacts(html, pageURL string) Facts {
 //
 // ValidatePhone gates every candidate inside ExtractSiteContacts, so this
 // never lowers phone validity.
-func applyContactOverride(html string, facts *Facts) {
-	contacts := ExtractSiteContacts(html)
-	if contacts.Phone == nil {
+func applyContactOverride(html, city string, facts *Facts) {
+	doc, err := documentFromHTML(html)
+	if err != nil || doc == nil {
 		return
 	}
-	switch contacts.PhoneRegion {
+
+	// Seed the resolver with the Layer-1/2 phone (JSON-LD telephone / regex)
+	// already on facts, so the local-area-code rule can pick it when it is the
+	// only city-local candidate.
+	var prior []string
+	if facts.Phone != nil {
+		prior = append(prior, *facts.Phone)
+	}
+
+	// Local-area-code rule (Decision 2): when the city is known and a
+	// candidate is local to it, that candidate is authoritative for this city
+	// and overrides any prior phone unconditionally — even a microdata number
+	// that source-order would rank below a non-local contacts-region tel:.
+	if expected := expectedAreaCodes(city); len(expected) > 0 {
+		if phone, _, ok := resolvePhoneForCity(doc, city, prior...); ok && matchesCity(phone, expected) {
+			p := phone
+			facts.Phone = &p
+			return
+		}
+	}
+
+	// Fallback: source-order ranking (contacts tel: > microdata > body tel:).
+	phone, region, ok := resolvePhoneForCity(doc, city, prior...)
+	if !ok {
+		return
+	}
+	switch region {
 	case regionContacts, regionMicrodata:
 		// Authoritative: override any prior phone.
-		facts.Phone = contacts.Phone
+		p := phone
+		facts.Phone = &p
 	default:
 		// region "other" (body / widget tel:): fill only if still nil.
 		if facts.Phone == nil {
-			facts.Phone = contacts.Phone
+			p := phone
+			facts.Phone = &p
 		}
 	}
 }

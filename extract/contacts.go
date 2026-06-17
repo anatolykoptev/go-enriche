@@ -6,6 +6,15 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
+// documentFromHTML parses HTML into a goquery document. Returns (nil, nil) for
+// empty input so callers can treat "no contacts" uniformly.
+func documentFromHTML(html string) (*goquery.Document, error) {
+	if html == "" {
+		return nil, nil
+	}
+	return goquery.NewDocumentFromReader(strings.NewReader(html))
+}
+
 // SiteContacts holds contact facts extracted directly from a page's DOM
 // (tel:/mailto: hrefs, microdata, og: meta). These are the venue's own,
 // human-facing contact links — the highest-signal authoritative source on a
@@ -39,6 +48,15 @@ const (
 	regionOther     = "other"     // a tel: elsewhere on the page (body/widget)
 )
 
+// Phone-candidate tiers, highest first. The local-area-code resolver ranks by
+// tier only as a fallback (when no candidate is local to the article's city).
+const (
+	tierDemoted   = 0 // a tel: inside a named call-tracking widget
+	tierBody      = 1 // a tel: in the page body / og:/JSON-LD prior phone
+	tierMicrodata = 2 // [itemprop=telephone]
+	tierContacts  = 3 // a tel: in the header/footer/address/contacts region
+)
+
 // contactsRegionSelectors mark DOM subtrees that are the venue's own contact
 // area. A tel: inside any of these outranks a tel: elsewhere on the page.
 const contactsRegionSelectors = "header, footer, address, .contacts, .contact, #contacts, #contact, .footer, .header"
@@ -70,11 +88,7 @@ const callTrackingSelectors = "[class*=calltrack], [class*=calltouch], [class*=c
 // skipped, never returned.
 func ExtractSiteContacts(html string) SiteContacts {
 	var out SiteContacts
-	if html == "" {
-		return out
-	}
-
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	doc, err := documentFromHTML(html)
 	if err != nil || doc == nil {
 		return out
 	}
@@ -213,4 +227,129 @@ func firstMailto(doc *goquery.Document) *string {
 		return true
 	})
 	return found
+}
+
+// --- Phase-1 local-area-code resolver (operator Decision 2, 2026-06-17) ---
+
+// phoneCandidate is one site-own phone with the metadata the resolver needs to
+// rank it: its DOM region tier and its area code.
+type phoneCandidate struct {
+	value    string // human-facing display value
+	tier     int    // tierContacts / tierMicrodata / tierBody / tierDemoted
+	areaCode int    // 3-digit RU area code, or -1
+}
+
+// collectPhoneCandidates returns every valid site-own phone candidate, each
+// tagged with a region tier and area code. The candidate set is the union of
+// (operator Decision 2 sources): tel: hrefs, microdata itemprop=telephone,
+// og:/business:contact_data phone meta, and any phone already resolved by
+// Layer 1/2 (JSON-LD telephone / regex, passed in via prior). ZERO network
+// I/O — a deterministic read over already-fetched HTML.
+func collectPhoneCandidates(doc *goquery.Document, prior ...string) []phoneCandidate {
+	var cands []phoneCandidate
+	// Layer-1/2 phones (JSON-LD telephone, regex) seeded as low-tier
+	// candidates so the local-area-code rule can still pick them when they are
+	// the only city-local number.
+	for _, pp := range prior {
+		if pp != "" && ValidatePhone(pp) {
+			cands = append(cands, phoneCandidate{value: pp, tier: tierBody, areaCode: phoneAreaCode(pp)})
+		}
+	}
+	doc.Find(`a[href^="tel:"], a[href^="TEL:"]`).Each(func(_ int, s *goquery.Selection) {
+		raw, ok := s.Attr("href")
+		if !ok {
+			return
+		}
+		display := strings.TrimSpace(s.Text())
+		if !ValidatePhone(display) {
+			display = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(raw, "tel:"), "TEL:"))
+		}
+		if !ValidatePhone(display) {
+			return
+		}
+		tier := tierBody
+		switch {
+		case isCallTrackingDemoted(s):
+			tier = tierDemoted
+		case s.Closest(contactsRegionSelectors).Length() > 0:
+			tier = tierContacts
+		}
+		cands = append(cands, phoneCandidate{value: display, tier: tier, areaCode: phoneAreaCode(display)})
+	})
+	doc.Find(`[itemprop="telephone"], [itemprop=telephone]`).Each(func(_ int, s *goquery.Selection) {
+		v := strings.TrimSpace(s.AttrOr("content", ""))
+		if v == "" {
+			v = strings.TrimSpace(s.Text())
+		}
+		if !ValidatePhone(v) {
+			return
+		}
+		cands = append(cands, phoneCandidate{value: v, tier: tierMicrodata, areaCode: phoneAreaCode(v)})
+	})
+	// og:/business contact-data phone meta (tier 1: structured but not a
+	// human-facing site link).
+	doc.Find(`meta[property="business:contact_data:phone_number"], meta[property="og:phone_number"], meta[name="og:phone_number"]`).Each(func(_ int, s *goquery.Selection) {
+		v := strings.TrimSpace(s.AttrOr("content", ""))
+		if ValidatePhone(v) {
+			cands = append(cands, phoneCandidate{value: v, tier: tierBody, areaCode: phoneAreaCode(v)})
+		}
+	})
+	return cands
+}
+
+// resolvePhoneForCity picks the best site-own phone given the article's target
+// city. The operator's rule (Decision 2): among ALL candidates, prefer the one
+// whose area code is local to the city; only when no candidate matches the
+// city's area code does it fall back to source-order (tier) ranking.
+//
+// Returns (phone, region, true) when a candidate is chosen, or ("", "", false)
+// when there is no valid candidate. region is "contacts"/"microdata"/"other"
+// so the caller (applyContactOverride) keeps its override-vs-fill semantics.
+func resolvePhoneForCity(doc *goquery.Document, city string, prior ...string) (string, string, bool) {
+	cands := collectPhoneCandidates(doc, prior...)
+	if len(cands) == 0 {
+		return "", "", false
+	}
+
+	// Local-area-code tiebreaker: if the city is known and any candidate is
+	// local, choose the highest-tier local candidate. This is what makes the
+	// SPb 812 microdata beat a Moscow 925 tel: href on a multi-city venue.
+	if expected := expectedAreaCodes(city); len(expected) > 0 {
+		best := -1
+		for i := range cands {
+			if !matchesCity(cands[i].value, expected) {
+				continue
+			}
+			if best < 0 || cands[i].tier > cands[best].tier {
+				best = i
+			}
+		}
+		if best >= 0 {
+			return cands[best].value, regionForTier(cands[best].tier), true
+		}
+	}
+
+	// Fallback: source-order (tier) ranking — contacts tel: > microdata >
+	// body tel: > demoted call-tracking. This is the plain tel:-wins behavior
+	// used when there is no city signal or no local candidate exists.
+	best := 0
+	for i := range cands {
+		if cands[i].tier > cands[best].tier {
+			best = i
+		}
+	}
+	return cands[best].value, regionForTier(cands[best].tier), true
+}
+
+// regionForTier maps a candidate tier back to the region label
+// applyContactOverride branches on.
+func regionForTier(tier int) string {
+	switch tier {
+	case tierContacts:
+		return regionContacts
+	case tierMicrodata:
+		return regionMicrodata
+	default:
+		return regionOther
+	}
 }
