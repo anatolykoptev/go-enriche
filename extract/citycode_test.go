@@ -120,3 +120,44 @@ func TestResolvePhoneForCity_LocalOnlyInOgMeta(t *testing.T) {
 		t.Errorf("local og: phone must win for SPb; got %q ok=%v", phone, ok)
 	}
 }
+
+// Regression guard (reviewer MAJOR, PR #13 round 3): on the no-city / no-local
+// fallback path a human-facing body tel: must outrank a microdata telephone —
+// the venue's own tel: is the top phone authority, and an empty/unknown city
+// must NOT reorder that. Locks the fix for the tier-order regression.
+func TestResolvePhoneForCity_NoCityBodyTelBeatsMicrodata(t *testing.T) {
+	t.Parallel()
+	html := `<html><body>
+	<p>звоните <a href="tel:+78121112233">+7 (812) 111-22-33</a></p>
+	<span itemprop="telephone">+7 (812) 999-88-77</span>
+	</body></html>`
+	doc, _ := documentFromHTML(html)
+	phone, region, ok := resolvePhoneForCity(doc, "")
+	if !ok {
+		t.Fatal("want a resolved phone")
+	}
+	if phone != "+7 (812) 111-22-33" {
+		t.Errorf("no-city: body tel: must beat microdata; want +7 (812) 111-22-33, got %q (region %s)", phone, region)
+	}
+}
+
+// 8-800 toll-free / call-tracking numbers must be demoted: a bare body 8-800
+// tel: must not beat a real local microdata number, and must not win over a
+// real body tel:. Guards the reviewer's 8-800-fallback finding.
+func TestResolvePhoneForCity_TollFreeDemoted(t *testing.T) {
+	t.Parallel()
+	// Body 8-800 tel: vs a microdata SPb number; SPb article -> 812 microdata
+	// wins on the local rule; even with no city the 8-800 is demoted below
+	// microdata so the microdata still wins.
+	html := `<html><body>
+	<p><a href="tel:+78005553535">8 (800) 555-35-35</a></p>
+	<span itemprop="telephone">+7 (812) 244-55-66</span>
+	</body></html>`
+	doc, _ := documentFromHTML(html)
+	for _, city := range []string{"Санкт-Петербург", ""} {
+		phone, _, ok := resolvePhoneForCity(doc, city)
+		if !ok || phone != "+7 (812) 244-55-66" {
+			t.Errorf("city=%q: 8-800 must be demoted below the real number; got %q ok=%v", city, phone, ok)
+		}
+	}
+}

@@ -51,10 +51,18 @@ const (
 // Phone-candidate tiers, highest first. The local-area-code resolver ranks by
 // tier only as a fallback (when no candidate is local to the article's city).
 const (
-	tierDemoted   = 0 // a tel: inside a named call-tracking widget
-	tierBody      = 1 // a tel: in the page body / og:/JSON-LD prior phone
-	tierMicrodata = 2 // [itemprop=telephone]
+	tierDemoted   = 0 // a tel: inside a named call-tracking widget, or an 8-800
+	tierMicrodata = 1 // [itemprop=telephone] / og: / JSON-LD prior phone
+	tierBody      = 2 // a human-facing tel: in the page body
 	tierContacts  = 3 // a tel: in the header/footer/address/contacts region
+)
+
+// tollFreeAreaCode is the 8-800 toll-free / call-tracking range. An 8-800 is
+// never a venue's local line for a city guide, so it is demoted in the
+// source-order fallback (it may still fill a still-nil phone, last).
+const (
+	tollFreeLo = 800
+	tollFreeHi = 800
 )
 
 // contactsRegionSelectors mark DOM subtrees that are the venue's own contact
@@ -247,14 +255,39 @@ type phoneCandidate struct {
 // I/O — a deterministic read over already-fetched HTML.
 func collectPhoneCandidates(doc *goquery.Document, prior ...string) []phoneCandidate {
 	var cands []phoneCandidate
-	// Layer-1/2 phones (JSON-LD telephone, regex) seeded as low-tier
+	// Layer-1/2 phones (JSON-LD telephone, regex) seeded as structured-tier
 	// candidates so the local-area-code rule can still pick them when they are
 	// the only city-local number.
 	for _, pp := range prior {
-		if pp != "" && ValidatePhone(pp) {
-			cands = append(cands, phoneCandidate{value: pp, tier: tierBody, areaCode: phoneAreaCode(pp)})
+		if c, ok := makeCandidate(pp, tierMicrodata); ok {
+			cands = append(cands, c)
 		}
 	}
+	cands = append(cands, telCandidates(doc)...)
+	cands = append(cands, microdataCandidates(doc)...)
+	cands = append(cands, ogPhoneCandidates(doc)...)
+	return cands
+}
+
+// makeCandidate validates a phone string and builds a phoneCandidate at the
+// given natural tier, demoting any 8-800 toll-free number to tierDemoted.
+// ok is false when the value is empty or fails ValidatePhone.
+func makeCandidate(value string, naturalTier int) (phoneCandidate, bool) {
+	value = strings.TrimSpace(value)
+	if !ValidatePhone(value) {
+		return phoneCandidate{}, false
+	}
+	ac := phoneAreaCode(value)
+	tier := naturalTier
+	if isTollFree(ac) {
+		tier = tierDemoted
+	}
+	return phoneCandidate{value: value, tier: tier, areaCode: ac}, true
+}
+
+// telCandidates collects tel:/TEL: hrefs, classified by DOM region.
+func telCandidates(doc *goquery.Document) []phoneCandidate {
+	var out []phoneCandidate
 	doc.Find(`a[href^="tel:"], a[href^="TEL:"]`).Each(func(_ int, s *goquery.Selection) {
 		raw, ok := s.Attr("href")
 		if !ok {
@@ -262,39 +295,54 @@ func collectPhoneCandidates(doc *goquery.Document, prior ...string) []phoneCandi
 		}
 		display := strings.TrimSpace(s.Text())
 		if !ValidatePhone(display) {
-			display = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(raw, "tel:"), "TEL:"))
+			display = strings.TrimPrefix(strings.TrimPrefix(raw, "tel:"), "TEL:")
 		}
-		if !ValidatePhone(display) {
-			return
+		c, ok := makeCandidate(display, telTier(s))
+		if ok {
+			out = append(out, c)
 		}
-		tier := tierBody
-		switch {
-		case isCallTrackingDemoted(s):
-			tier = tierDemoted
-		case s.Closest(contactsRegionSelectors).Length() > 0:
-			tier = tierContacts
-		}
-		cands = append(cands, phoneCandidate{value: display, tier: tier, areaCode: phoneAreaCode(display)})
 	})
+	return out
+}
+
+// telTier classifies a tel: link's DOM region into a natural tier (before any
+// 8-800 demotion, which makeCandidate applies).
+func telTier(s *goquery.Selection) int {
+	switch {
+	case isCallTrackingDemoted(s):
+		return tierDemoted
+	case s.Closest(contactsRegionSelectors).Length() > 0:
+		return tierContacts
+	default:
+		return tierBody
+	}
+}
+
+// microdataCandidates collects [itemprop=telephone] values.
+func microdataCandidates(doc *goquery.Document) []phoneCandidate {
+	var out []phoneCandidate
 	doc.Find(`[itemprop="telephone"], [itemprop=telephone]`).Each(func(_ int, s *goquery.Selection) {
 		v := strings.TrimSpace(s.AttrOr("content", ""))
 		if v == "" {
 			v = strings.TrimSpace(s.Text())
 		}
-		if !ValidatePhone(v) {
-			return
+		if c, ok := makeCandidate(v, tierMicrodata); ok {
+			out = append(out, c)
 		}
-		cands = append(cands, phoneCandidate{value: v, tier: tierMicrodata, areaCode: phoneAreaCode(v)})
 	})
-	// og:/business contact-data phone meta (tier 1: structured but not a
-	// human-facing site link).
+	return out
+}
+
+// ogPhoneCandidates collects og:/business:contact_data phone meta — structured
+// but not a human-facing site link, so tierMicrodata.
+func ogPhoneCandidates(doc *goquery.Document) []phoneCandidate {
+	var out []phoneCandidate
 	doc.Find(`meta[property="business:contact_data:phone_number"], meta[property="og:phone_number"], meta[name="og:phone_number"]`).Each(func(_ int, s *goquery.Selection) {
-		v := strings.TrimSpace(s.AttrOr("content", ""))
-		if ValidatePhone(v) {
-			cands = append(cands, phoneCandidate{value: v, tier: tierBody, areaCode: phoneAreaCode(v)})
+		if c, ok := makeCandidate(s.AttrOr("content", ""), tierMicrodata); ok {
+			out = append(out, c)
 		}
 	})
-	return cands
+	return out
 }
 
 // resolvePhoneForCity picks the best site-own phone given the article's target
@@ -317,7 +365,7 @@ func resolvePhoneForCity(doc *goquery.Document, city string, prior ...string) (s
 	if expected := expectedAreaCodes(city); len(expected) > 0 {
 		best := -1
 		for i := range cands {
-			if !matchesCity(cands[i].value, expected) {
+			if !areaCodeMatches(cands[i].areaCode, expected) {
 				continue
 			}
 			if best < 0 || cands[i].tier > cands[best].tier {
@@ -329,9 +377,11 @@ func resolvePhoneForCity(doc *goquery.Document, city string, prior ...string) (s
 		}
 	}
 
-	// Fallback: source-order (tier) ranking — contacts tel: > microdata >
-	// body tel: > demoted call-tracking. This is the plain tel:-wins behavior
-	// used when there is no city signal or no local candidate exists.
+	// Fallback: source-order (tier) ranking — contacts-region tel: > body
+	// tel: > microdata/og: > demoted (call-tracking / 8-800). The venue's own
+	// human-facing tel: outranks structured telephone data; this is the plain
+	// tel:-wins behavior used when there is no city signal or no local
+	// candidate exists.
 	best := 0
 	for i := range cands {
 		if cands[i].tier > cands[best].tier {
@@ -339,6 +389,12 @@ func resolvePhoneForCity(doc *goquery.Document, city string, prior ...string) (s
 		}
 	}
 	return cands[best].value, regionForTier(cands[best].tier), true
+}
+
+// isTollFree reports whether a 3-digit area code is in the 8-800 toll-free
+// range — never a venue's local line for a city guide.
+func isTollFree(areaCode int) bool {
+	return areaCode >= tollFreeLo && areaCode <= tollFreeHi
 }
 
 // regionForTier maps a candidate tier back to the region label

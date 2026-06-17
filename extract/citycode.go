@@ -67,14 +67,10 @@ func phoneAreaCode(phone string) int {
 	return code
 }
 
-// matchesCity reports whether a phone's area code is local to the given
-// expected-area-code set.
-func matchesCity(phone string, expected []int) bool {
-	if len(expected) == 0 {
-		return false
-	}
-	code := phoneAreaCode(phone)
-	if code < 0 {
+// areaCodeMatches reports whether a precomputed 3-digit area code is local to
+// the expected-area-code set.
+func areaCodeMatches(code int, expected []int) bool {
+	if code < 0 || len(expected) == 0 {
 		return false
 	}
 	for _, want := range expected {
@@ -83,4 +79,11 @@ func matchesCity(phone string, expected []int) bool {
 		}
 	}
 	return false
+}
+
+// matchesCity reports whether a phone string's area code is local to the given
+// expected-area-code set. Convenience wrapper over areaCodeMatches for callers
+// that have the string but not the precomputed code.
+func matchesCity(phone string, expected []int) bool {
+	return areaCodeMatches(phoneAreaCode(phone), expected)
 }

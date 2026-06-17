@@ -95,21 +95,19 @@ func applyContactOverride(html, city string, facts *Facts) {
 		prior = append(prior, *facts.Phone)
 	}
 
-	// Local-area-code rule (Decision 2): when the city is known and a
-	// candidate is local to it, that candidate is authoritative for this city
-	// and overrides any prior phone unconditionally — even a microdata number
-	// that source-order would rank below a non-local contacts-region tel:.
-	if expected := expectedAreaCodes(city); len(expected) > 0 {
-		if phone, _, ok := resolvePhoneForCity(doc, city, prior...); ok && matchesCity(phone, expected) {
-			p := phone
-			facts.Phone = &p
-			return
-		}
-	}
-
-	// Fallback: source-order ranking (contacts tel: > microdata > body tel:).
+	// Resolve once. When the city is known, resolvePhoneForCity already
+	// applied the local-area-code rule (Decision 2): a candidate local to the
+	// city — any region — was chosen and is authoritative for this city, so it
+	// overrides any prior phone unconditionally. Otherwise the result is the
+	// source-order pick (contacts tel: > body tel: > microdata/og:), which
+	// keeps its override-vs-fill semantics below.
 	phone, region, ok := resolvePhoneForCity(doc, city, prior...)
 	if !ok {
+		return
+	}
+	if expected := expectedAreaCodes(city); len(expected) > 0 && matchesCity(phone, expected) {
+		p := phone
+		facts.Phone = &p
 		return
 	}
 	switch region {
