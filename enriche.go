@@ -116,7 +116,10 @@ func (e *Enricher) Enrich(ctx context.Context, item Item) (*Result, error) {
 	}
 
 	// Reconcile closed-status against the official site (false-closed class).
-	e.reconcileClosedStatus(ctx, item, result, mapsClosedStatus, siteFetched)
+	// closedStands is true when maps reported the venue closed and the official
+	// site did NOT refute it (no/unreachable/down site) — the closed verdict is
+	// final and a lower-authority source must not overturn it.
+	closedStands := e.reconcileClosedStatus(ctx, item, result, mapsClosedStatus, siteFetched)
 
 	// Search.
 	if e.search != nil {
@@ -124,8 +127,11 @@ func (e *Enricher) Enrich(ctx context.Context, item Item) (*Result, error) {
 	}
 
 	// When no primary URL, fetch top search source URLs for content + facts.
+	// A search-discovered third-party page is NOT authority to refute a maps
+	// closed-status, so its Status upgrade is suppressed when closedStands —
+	// only a reachable, active official site may resurrect a closed venue.
 	if item.URL == "" && result.Content == "" {
-		e.fetchSearchSources(ctx, item, result, r)
+		e.fetchSearchSources(ctx, item, result, r, closedStands)
 	}
 
 	// Phone-source telemetry: report the winning phone's provenance once.
@@ -150,20 +156,25 @@ func (e *Enricher) Enrich(ctx context.Context, item Item) (*Result, error) {
 // false-closed class: a wrong Yandex/2GIS card marks an operating venue
 // closed). When the site is NOT active (or no site exists), the maps
 // closed-status stands.
-func (e *Enricher) reconcileClosedStatus(ctx context.Context, item Item, result *Result, mapsClosedStatus fetch.PageStatus, siteFetched bool) {
+//
+// Returns true when the closed verdict STANDS (final) — the caller must then
+// suppress any lower-authority Status upgrade (e.g. the search fallback), since
+// only a reachable, active official site may resurrect a closed venue.
+func (e *Enricher) reconcileClosedStatus(ctx context.Context, item Item, result *Result, mapsClosedStatus fetch.PageStatus, siteFetched bool) bool {
 	if mapsClosedStatus == "" {
-		return
+		return false
 	}
 	if siteFetched && siteRefutesClosed(result.Status) {
 		// result.Status already holds the site's StatusActive from fetchAndExtract.
 		e.logger.InfoContext(ctx, "enriche: live official site refutes maps closed-status",
 			"name", item.Name, "status", result.Status)
-		return
+		return false
 	}
 	// Site absent / unreachable / down — keep the maps closed verdict.
 	result.Status = mapsClosedStatus
 	e.logger.InfoContext(ctx, "enriche: maps closed-status stands (site not active)",
 		"name", item.Name, "status", result.Status)
+	return true
 }
 
 // EnrichBatch enriches multiple items concurrently with bounded concurrency.

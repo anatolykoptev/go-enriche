@@ -73,26 +73,31 @@ type resolver struct {
 //     (equal lets a later same-priority pass refresh, harmless);
 //   - strictly lower source → fill ONLY if the field is still absent.
 //
-// When a value is REJECTED because the incumbent is a higher-priority source
-// AND the two values genuinely differ, that is a real source conflict the
-// resolver just adjudicated — counted via OnConflict so the override is
-// observable.
+// Conflict telemetry fires whenever two DIFFERENT-priority sources offer a
+// genuinely DIFFERENT value for the same field — regardless of merge order:
+//   - higher source overrides a present, differing lower value (override case);
+//   - lower source is REJECTED because a higher source already owns a differing
+//     value (rejection case).
+//
+// This makes enrich_conflict_total{field} order-INDEPENDENT (the resolved value
+// already is): site-then-maps and maps-then-site both count the same conflict.
 func (r *resolver) set(dst **string, owner *fieldSource, val string, src fieldSource, field string) {
 	if val == "" {
 		return
 	}
+	// A real cross-source conflict: a value is present, the new value differs,
+	// and the two sources are at different priorities (neither absent).
+	if *dst != nil && **dst != val && src != *owner && *owner > sourceNone && src > sourceNone {
+		r.m.conflict(field)
+	}
 	if src >= *owner {
-		// Conflict telemetry: a strictly-higher source is overriding a present,
-		// differing lower-source value (e.g. site phone overriding maps phone).
-		if *dst != nil && **dst != val && src > *owner && *owner > sourceNone {
-			r.m.conflict(field)
-		}
 		v := val
 		*dst = &v
 		*owner = src
 		return
 	}
-	// Strictly lower source: fill the gap only.
+	// Strictly lower source: fill the gap only (never overrides; the conflict,
+	// if any, was already counted above).
 	if *dst == nil {
 		v := val
 		*dst = &v

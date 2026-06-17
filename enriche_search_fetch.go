@@ -13,8 +13,15 @@ const defaultSearchFetchLimit = 5
 
 // fetchSearchSources fetches top N URLs from search results when the item has
 // no primary URL. Extracts text content and structured facts from each page,
-// merging everything into the result (fill-nil-only for facts, concatenate content).
-func (e *Enricher) fetchSearchSources(ctx context.Context, item Item, result *Result, r *resolver) {
+// merging everything into the result (resolver fill-only for facts at
+// sourceSearch, concatenate content).
+//
+// closedStands suppresses the StatusActive upgrade: a search-discovered
+// third-party page is NOT authority to refute a maps closed-status (only a
+// reachable, active official site may). When closedStands is true the closed
+// verdict is preserved — content/facts may still be collected, but the venue is
+// not resurrected to active by a stale aggregator listing.
+func (e *Enricher) fetchSearchSources(ctx context.Context, item Item, result *Result, r *resolver, closedStands bool) {
 	sources := e.searchSourcesToFetch(result)
 	if len(sources) == 0 {
 		return
@@ -33,7 +40,7 @@ func (e *Enricher) fetchSearchSources(ctx context.Context, item Item, result *Re
 		result.Content = joined
 	}
 
-	if fetchedAny {
+	if fetchedAny && !closedStands {
 		result.Status = StatusActive
 	}
 }

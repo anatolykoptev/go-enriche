@@ -10,6 +10,7 @@ import (
 
 	"github.com/anatolykoptev/go-enriche/fetch"
 	"github.com/anatolykoptev/go-enriche/maps"
+	"github.com/anatolykoptev/go-enriche/search"
 )
 
 // Orchestration-level golden regression set (Phase 2). The extract-layer golden
@@ -61,6 +62,11 @@ func derefStr(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+// searchResult builds a search.SearchResult with the given context + source URLs.
+func searchResult(ctx string, sources []string) search.SearchResult {
+	return search.SearchResult{Context: ctx, Sources: sources}
 }
 
 // TestEnrich_Orchestration_SiteBeatsMapsPhone is the HEADLINE Phase-2 guard:
@@ -194,6 +200,8 @@ func TestEnrich_Orchestration_FalseClosed_SiteRefutes(t *testing.T) {
 // TestEnrich_Orchestration_ClosedNoSite_MapsStands is the inverse guard: when
 // maps reports closed AND there is no reachable official site (no URL), the
 // maps closed-status must STAND — the site cannot refute what it cannot prove.
+// Wires a search provider (the production go-wp config ALWAYS has one) to ensure
+// the doSearch/fetchSearchSources path does not overturn the closed verdict.
 func TestEnrich_Orchestration_ClosedNoSite_MapsStands(t *testing.T) {
 	t.Parallel()
 
@@ -201,7 +209,10 @@ func TestEnrich_Orchestration_ClosedNoSite_MapsStands(t *testing.T) {
 		Status: maps.PlacePermanentClosed,
 		MapURL: "https://2gis.ru/x",
 	}}
-	e := New(WithMapsChecker(checker))
+	// Search provider present but returning no fetchable sources.
+	sr := searchResult("закрытое кафе", nil)
+	prov := &mockProvider{result: &sr}
+	e := New(WithMapsChecker(checker), WithSearch(prov))
 	result, err := e.Enrich(context.Background(), Item{
 		Name: "Закрытое навсегда", City: spbCity, Mode: ModePlaces, // no URL
 	})
@@ -210,6 +221,49 @@ func TestEnrich_Orchestration_ClosedNoSite_MapsStands(t *testing.T) {
 	}
 	if result.Status != fetch.StatusClosed {
 		t.Errorf("Status = %q, want closed (no site to refute)", result.Status)
+	}
+}
+
+// TestEnrich_Orchestration_ClosedNoSite_SearchDoesNotResurrect is the regression
+// guard for the search-fallback resurrection class (caught in PR #14 review):
+// maps reports the venue closed, there is no official site, AND a search
+// provider returns a fetchable third-party page (a stale aggregator listing).
+// A search-discovered page is NOT authority to refute a maps closed-status, so
+// the venue must STAY closed — it must not be resurrected to StatusActive by the
+// search-source content fetch.
+func TestEnrich_Orchestration_ClosedNoSite_SearchDoesNotResurrect(t *testing.T) {
+	t.Parallel()
+
+	// A live third-party page (e.g. a stale 2gis/zoon listing) that fetches 200.
+	thirdParty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!DOCTYPE html><html><body><article>` + //nolint:errcheck
+			`<h1>Кафе на Невском</h1><p>Описание заведения из стороннего каталога, ` +
+			`достаточно длинное чтобы пройти порог извлечения текста трафилатурой. ` +
+			`Этот листинг устарел и не отражает реальный статус заведения.</p>` +
+			`</article></body></html>`))
+	}))
+	defer thirdParty.Close()
+
+	checker := stubMapsChecker{res: &maps.CheckResult{
+		Status: maps.PlacePermanentClosed,
+		MapURL: "https://2gis.ru/closed-card",
+	}}
+	// Search returns the third-party URL as a fetchable source.
+	sr := searchResult("кафе на невском отзывы", []string{thirdParty.URL})
+	prov := &mockProvider{result: &sr}
+
+	e := New(WithFetcher(fetch.NewFetcher()), WithMapsChecker(checker), WithSearch(prov))
+	result, err := e.Enrich(context.Background(), Item{
+		Name: "Кафе на Невском", City: spbCity, Mode: ModePlaces, // no URL
+	})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+	if result.Status == fetch.StatusActive {
+		t.Errorf("Status = active — a stale search-discovered page resurrected a maps-closed venue (the PR-review MAJOR)")
+	}
+	if result.Status != fetch.StatusClosed {
+		t.Errorf("Status = %q, want closed (search page is not authority to refute closed)", result.Status)
 	}
 }
 
@@ -291,25 +345,32 @@ func TestResolver_OrderIndependence(t *testing.T) {
 	const sitePhone = "+79219561840"
 	const mapsPhone = "+7 (812) 956-18-40"
 
-	build := func() (*Facts, *resolver) {
+	build := func() (*Facts, *resolver, *countingMetrics) {
 		f := &Facts{}
-		return f, &resolver{facts: f, prov: &factProvenance{}, m: nil}
+		c, m := newCountingMetrics()
+		return f, &resolver{facts: f, prov: &factProvenance{}, m: m}, c
 	}
 
-	// Order A: maps first, then site.
-	fA, rA := build()
+	// Order A: maps first, then site (the production order).
+	fA, rA, cA := build()
 	rA.set(&fA.Phone, &rA.prov.phone, mapsPhone, sourceMaps, "phone")
 	rA.set(&fA.Phone, &rA.prov.phone, sitePhone, sourceOfficialSite, "phone")
 
-	// Order B: site first, then maps.
-	fB, rB := build()
+	// Order B: site first, then maps (reverse).
+	fB, rB, cB := build()
 	rB.set(&fB.Phone, &rB.prov.phone, sitePhone, sourceOfficialSite, "phone")
 	rB.set(&fB.Phone, &rB.prov.phone, mapsPhone, sourceMaps, "phone")
 
+	// Resolved VALUE is order-independent.
 	if derefStr(fA.Phone) != sitePhone || derefStr(fB.Phone) != sitePhone {
 		t.Errorf("order-dependence: A=%q B=%q, both want %q", derefStr(fA.Phone), derefStr(fB.Phone), sitePhone)
 	}
 	if rA.prov.phone != sourceOfficialSite || rB.prov.phone != sourceOfficialSite {
 		t.Errorf("owner not official_site: A=%v B=%v", rA.prov.phone, rB.prov.phone)
+	}
+	// Conflict COUNT is also order-independent: both orders adjudicated exactly
+	// one site-vs-maps phone conflict (PR-review LOW finding).
+	if cA.conflicts["phone"] != 1 || cB.conflicts["phone"] != 1 {
+		t.Errorf("conflict count order-dependent: A=%d B=%d, both want 1", cA.conflicts["phone"], cB.conflicts["phone"])
 	}
 }
