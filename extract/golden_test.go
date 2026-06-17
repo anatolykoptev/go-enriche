@@ -12,8 +12,12 @@ import (
 //
 // Provenance per fixture:
 //   - igora-drive.html      REAL (live drive-igora.ru capture 2026-06-17)
-//   - royal-wedding.html    REAL (live royal-wedding.ru capture 2026-06-17) —
-//     multi-city: Moscow HQ tel:/og:, SPb branch only in microdata.
+//   - royal-wed.html         REAL (live royal-wed.ru static capture 2026-06-17) —
+//     the venue's REAL SPb official site (article 56564 CTA target). Runs
+//     Roistat DNI: the visible (812) tel: ROTATES (956-18-40 / 439-18-55 /
+//     704-85-45), so the only stable phone is the hard-coded WhatsApp social
+//     link +7 (921) 956-18-40. The Moscow sibling royal-wedding.ru was DROPPED
+//     (different city entity: t.me/royalweddingmsk, +7 925 ...).
 //   - vzaimno.html          REPRESENTATIVE (domain unresolved at capture)
 //   - easyweddingday.html   REPRESENTATIVE (live site 200 but price JS-rendered)
 //   - no-site.html          REPRESENTATIVE (VK/2GIS-only, no own domain)
@@ -50,26 +54,28 @@ func TestGoldenRegression_ExtractFacts(t *testing.T) {
 			wantNotPhone: "+7 (800) 555-35-35",
 		},
 		{
-			// REAL capture, the headline Decision-2 case. Multi-city venue: the
-			// tel: href + og: are the MOSCOW 925 line; the SPb branch number
-			// 956-18-40 (812) exists ONLY as one microdata itemprop=telephone.
-			// For an SPb guide the 812 microdata candidate must beat the 925
-			// tel: href. Plain tel:-wins returns the WRONG 925.
-			name:         "royal_wedding_spb_local_area_code_picks_812_microdata",
-			fixture:      "royal-wedding.html",
+			// REAL capture, the headline DNI case. royal-wed.ru runs Roistat
+			// dynamic-number-insertion: the static (812) 956-18-40 in the tel:
+			// href + 8x itemprop=telephone + og: meta is a ROTATING proxy slot
+			// (operator witnessed 956-18-40 / 439-18-55 / 704-85-45). The only
+			// stable, owned, DNI-immune phone is the hard-coded WhatsApp social
+			// link +7 (921) 956-18-40 (the value that shipped to the live
+			// article). The resolver MUST return the social-link number and
+			// MUST NOT assert any rotating (812) proxy as the venue's phone.
+			name:         "royal_wed_spb_social_link_beats_dni_rotating_812",
+			fixture:      "royal-wed.html",
 			city:         spb,
-			wantPhone:    "+7 (812) 956-18-40",
-			wantNotPhone: "+7-925-580-81-18",
+			wantPhone:    "+79219561840",
+			wantNotPhone: "+7 (812) 956-18-40",
 		},
 		{
-			// Same fixture, NO city hint, so the area-code rule cannot fire and
-			// the resolver falls back to tel:-wins: the Moscow 925 tel: href.
-			// This is the documented Phase-1 fallback (do NOT fabricate the SPb
-			// number when there is no city signal).
-			name:         "royal_wedding_no_city_falls_back_to_tel_wins_925",
-			fixture:      "royal-wedding.html",
+			// Same fixture, NO city hint: the social-link phone is the top
+			// authority independent of any city tiebreaker, so it still wins —
+			// the rotating (812) is never asserted regardless of city signal.
+			name:         "royal_wed_no_city_social_link_still_wins",
+			fixture:      "royal-wed.html",
 			city:         "",
-			wantPhone:    "+7-925-580-81-18",
+			wantPhone:    "+79219561840",
 			wantNotPhone: "+7 (812) 956-18-40",
 		},
 		{

@@ -164,3 +164,84 @@ func TestApplyContactOverride_CallTrackingNestedInContactsIsDemoted(t *testing.T
 		t.Fatalf("nested call-tracking tel: must be demoted; want +7 (812) 333-44-55, got %v", facts.Phone)
 	}
 }
+
+// --- social-link (DNI-immune) phone extraction (2026-06-17 reconciliation) ---
+
+// The headline DNI regression: a Roistat-style site whose visible (812) tel:
+// href + microdata is a rotating proxy must resolve to its hard-coded WhatsApp
+// social-link number, NOT the rotating (812). Asserts both the SPb-city path
+// (where the area-code rule would otherwise pick the local (812)) and the
+// no-city path.
+func TestApplyContactOverride_SocialLinkBeatsRotatingTel(t *testing.T) {
+	t.Parallel()
+	// Mirrors royal-wed.ru: a contacts-region (812) tel: (the DNI slot) plus a
+	// matching 8x microdata (812), plus the stable WhatsApp social link.
+	html := `<html><body>
+	<header class="header">
+	  <a href="tel:+78129561840">+7 (812) 956-18-40</a>
+	  <a href="https://api.whatsapp.com/send?phone=79219561840">WhatsApp</a>
+	  <a href="https://t.me/royal_wedding_spb">Telegram</a>
+	</header>
+	<div itemscope itemtype="https://schema.org/LocalBusiness">
+	  <meta itemprop="telephone" content="+7 (812) 956-18-40">
+	</div></body></html>`
+
+	for _, city := range []string{"Санкт-Петербург", ""} {
+		facts := ExtractFactsForCity(html, "https://royal-wed.ru", city)
+		if facts.Phone == nil {
+			t.Fatalf("city=%q: want social-link phone, got nil", city)
+		}
+		if *facts.Phone != "+79219561840" {
+			t.Errorf("city=%q: want stable social link +79219561840, got %q", city, *facts.Phone)
+		}
+		if *facts.Phone == "+7 (812) 956-18-40" {
+			t.Errorf("city=%q: must NOT assert the rotating DNI (812) proxy", city)
+		}
+	}
+}
+
+// With NO social link present, the existing behavior is unchanged: a clean
+// non-DNI 812 site (Игора-Драйв class) still resolves to its (812) tel:.
+func TestApplyContactOverride_NoSocialLinkKeepsTel(t *testing.T) {
+	t.Parallel()
+	html := `<html><body><footer class="footer">
+	  <a href="tel:+78126157000">+7 (812) 615 70 00</a>
+	</footer></body></html>`
+	facts := ExtractFactsForCity(html, "https://drive-igora.ru", "Санкт-Петербург")
+	if facts.Phone == nil || *facts.Phone != "+7 (812) 615 70 00" {
+		t.Fatalf("no social link: want +7 (812) 615 70 00, got %v", facts.Phone)
+	}
+}
+
+// socialLinkPhone unit coverage: both WhatsApp href shapes + the non-phone
+// Telegram handle (which must yield no number).
+func TestSocialLinkPhone(t *testing.T) {
+	t.Parallel()
+	cases := []struct{ in, want string }{
+		{"https://api.whatsapp.com/send?phone=79219561840", "+79219561840"},
+		{"https://api.whatsapp.com/send?phone=79219561840&text=hi", "+79219561840"},
+		{"https://wa.me/79219561840", "+79219561840"},
+		{"https://wa.me/79219561840?text=hello", "+79219561840"},
+		{"https://t.me/royal_wedding_spb", ""},
+		{"https://example.com/contacts", ""},
+	}
+	for _, c := range cases {
+		if got := socialLinkPhone(c.in); got != c.want {
+			t.Errorf("socialLinkPhone(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// A social-link 8-800 (unheard of, but guard it) must be demoted, not treated
+// as the top authority — toll-free is never a venue's owned local line.
+func TestSocialLink_TollFreeStillDemoted(t *testing.T) {
+	t.Parallel()
+	html := `<html><body>
+	<a href="https://wa.me/78005553535">WhatsApp</a>
+	<footer class="footer"><a href="tel:+78126157000">+7 (812) 615 70 00</a></footer>
+	</body></html>`
+	facts := ExtractFactsForCity(html, "https://example.com", "Санкт-Петербург")
+	if facts.Phone == nil || *facts.Phone != "+7 (812) 615 70 00" {
+		t.Fatalf("toll-free social link must be demoted, real 812 tel: must win; got %v", facts.Phone)
+	}
+}

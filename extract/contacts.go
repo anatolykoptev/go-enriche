@@ -49,7 +49,7 @@ type SiteContacts struct {
 
 // Phone-region classifications returned in SiteContacts.PhoneRegion.
 const (
-	regionContacts  = "contacts"  // header/footer/<address>/contacts block
+	regionContacts  = "contacts"  // header/footer/<address>/contacts block (and social-link, both authoritative)
 	regionMicrodata = "microdata" // [itemprop=telephone]
 	regionOther     = "other"     // a tel: elsewhere on the page (body/widget)
 )
@@ -57,10 +57,11 @@ const (
 // Phone-candidate tiers, highest first. The local-area-code resolver ranks by
 // tier only as a fallback (when no candidate is local to the article's city).
 const (
-	tierDemoted   = 0 // a tel: inside a named call-tracking widget, or an 8-800
-	tierMicrodata = 1 // [itemprop=telephone] / og: / JSON-LD prior phone
-	tierBody      = 2 // a human-facing tel: in the page body
-	tierContacts  = 3 // a tel: in the header/footer/address/contacts region
+	tierDemoted    = 0 // a tel: inside a named call-tracking widget, or an 8-800
+	tierMicrodata  = 1 // [itemprop=telephone] / og: / JSON-LD prior phone
+	tierBody       = 2 // a human-facing tel: in the page body
+	tierContacts   = 3 // a tel: in the header/footer/address/contacts region
+	tierSocialLink = 4 // a hard-coded wa.me / api.whatsapp.com phone — DNI-immune
 )
 
 // tollFreeAreaCode is the 8-800 toll-free / call-tracking area code. An 8-800
@@ -85,6 +86,20 @@ const contactsRegionSelectors = "header, footer, address, .contacts, .contact, #
 // isCallTrackingDemoted).
 const callTrackingSelectors = "[class*=calltrack], [class*=calltouch], [class*=comagic], [class*=mango], .b24-widget, [class*=callibri], [class*=uiscom]"
 
+// socialLinkSelectors mark anchors carrying a hard-coded phone number in their
+// href: WhatsApp click-to-chat (wa.me / api.whatsapp.com/send?phone=). The
+// WhatsApp href embeds the agency's real owned number directly in the URL; it
+// is set once in the markup and is NEVER rewritten by a call-tracking /
+// dynamic-number-insertion (DNI) widget, which only ever swaps a displayed
+// tel: slot. On a DNI site (e.g. Roistat/Calltouch rotating the visible (812)
+// header number) the social-link number is the only phone invariant that
+// survives every fetch — raw HTTP or JS-rendered — so it is ranked as the TOP
+// phone authority (tierSocialLink), above any injected/rotating tel:.
+//
+// Telegram t.me/<handle> carries a handle, not a number, so it is not a phone
+// source on its own; only wa.me / api.whatsapp.com/send?phone= yield a number.
+const socialLinkSelectors = `a[href*="wa.me/"], a[href*="api.whatsapp.com/send"], a[href*="whatsapp.com/send"]`
+
 // ExtractSiteContacts parses already-fetched HTML for the venue's own contact
 // facts via the DOM. It performs ZERO network I/O — it is a deterministic,
 // in-process read over the same HTML fetch.ExtractFacts already received.
@@ -104,11 +119,20 @@ func ExtractSiteContacts(html string) SiteContacts {
 		return out
 	}
 
-	out.Phone, out.PhoneRegion = bestTelPhone(doc)
-	if out.Phone == nil {
-		if mp := microdataPhone(doc); mp != nil {
-			out.Phone = mp
-			out.PhoneRegion = regionMicrodata
+	// A hard-coded social-link phone (wa.me / api.whatsapp.com) is the
+	// DNI-immune top authority — see socialLinkSelectors. Prefer it over any
+	// tel:/microdata, which a call-tracking widget can rotate.
+	if sl := socialLinkCandidates(doc); len(sl) > 0 {
+		v := sl[0].value
+		out.Phone = &v
+		out.PhoneRegion = regionContacts
+	} else {
+		out.Phone, out.PhoneRegion = bestTelPhone(doc)
+		if out.Phone == nil {
+			if mp := microdataPhone(doc); mp != nil {
+				out.Phone = mp
+				out.PhoneRegion = regionMicrodata
+			}
 		}
 	}
 	out.Email = firstMailto(doc)
@@ -266,6 +290,7 @@ func collectPhoneCandidates(doc *goquery.Document, prior ...string) []phoneCandi
 			cands = append(cands, c)
 		}
 	}
+	cands = append(cands, socialLinkCandidates(doc)...)
 	cands = append(cands, telCandidates(doc)...)
 	cands = append(cands, microdataCandidates(doc)...)
 	cands = append(cands, ogPhoneCandidates(doc)...)
@@ -321,6 +346,63 @@ func telTier(s *goquery.Selection) int {
 	}
 }
 
+// socialLinkCandidates collects phones embedded in WhatsApp click-to-chat
+// hrefs (wa.me/<digits> or api.whatsapp.com/send?phone=<digits>). These are
+// hard-coded, owned numbers immune to call-tracking DNI rotation, so they are
+// emitted at tierSocialLink — the top phone authority. An 8-800 is still
+// demoted (makeCandidate), though a toll-free WhatsApp link is unheard of.
+func socialLinkCandidates(doc *goquery.Document) []phoneCandidate {
+	var out []phoneCandidate
+	doc.Find(socialLinkSelectors).Each(func(_ int, s *goquery.Selection) {
+		raw, ok := s.Attr("href")
+		if !ok {
+			return
+		}
+		phone := socialLinkPhone(raw)
+		if phone == "" {
+			return
+		}
+		if c, ok := makeCandidate(phone, tierSocialLink); ok {
+			out = append(out, c)
+		}
+	})
+	return out
+}
+
+// socialLinkPhone extracts the bare phone digits from a WhatsApp href and
+// formats them as a "+<digits>" string ValidatePhone/phoneAreaCode can parse.
+// Handles wa.me/79219561840, api.whatsapp.com/send?phone=79219561840, and the
+// 8-prefixed and country-bare variants. Returns "" when no plausible RU number
+// is present.
+func socialLinkPhone(href string) string {
+	raw := href
+	// api.whatsapp.com/send?phone=NNN — take the phone query value.
+	if i := strings.Index(raw, "phone="); i >= 0 {
+		raw = raw[i+len("phone="):]
+	} else if i := strings.Index(raw, "wa.me/"); i >= 0 {
+		// wa.me/NNN — take the path segment.
+		raw = raw[i+len("wa.me/"):]
+	}
+	// Cut at the first non-number boundary (&, ?, /, #, quote).
+	for j := 0; j < len(raw); j++ {
+		c := raw[j]
+		if c < '0' || c > '9' {
+			if c == '+' {
+				continue
+			}
+			raw = raw[:j]
+			break
+		}
+	}
+	digits := reDigitsOnly.ReplaceAllString(raw, "")
+	if len(digits) == 0 {
+		return ""
+	}
+	// Normalize to a leading "+" so ValidatePhone's digit parse and
+	// phoneAreaCode (which expect a leading 7/8) see a well-formed number.
+	return "+" + digits
+}
+
 // microdataCandidates collects [itemprop=telephone] values.
 func microdataCandidates(doc *goquery.Document) []phoneCandidate {
 	var out []phoneCandidate
@@ -360,6 +442,21 @@ func resolvePhoneForCity(doc *goquery.Document, city string, prior ...string) (s
 	cands := collectPhoneCandidates(doc, prior...)
 	if len(cands) == 0 {
 		return "", "", false
+	}
+
+	// Top authority: a hard-coded social-link phone (tierSocialLink, from a
+	// wa.me / api.whatsapp.com href). It is the agency's owned number embedded
+	// in the markup and is immune to call-tracking DNI rotation, so it wins
+	// UNCONDITIONALLY — before the local-area-code tiebreaker. This is what
+	// makes a DNI venue (e.g. royal-wed.ru, whose visible (812) tel: rotates
+	// via Roistat) resolve to its stable WhatsApp number instead of a rotating
+	// proxy. The area-code rule only disambiguates among injected/rotating
+	// candidates; the social link bypasses it (a city's mobile/social number
+	// is not expected to carry the city's landline area code).
+	for i := range cands {
+		if cands[i].tier == tierSocialLink {
+			return cands[i].value, regionForTier(cands[i].tier), true
+		}
 	}
 
 	// Local-area-code tiebreaker: if the city is known and any candidate is
@@ -404,7 +501,7 @@ func isTollFree(areaCode int) bool {
 // applyContactOverride branches on.
 func regionForTier(tier int) string {
 	switch tier {
-	case tierContacts:
+	case tierSocialLink, tierContacts:
 		return regionContacts
 	case tierMicrodata:
 		return regionMicrodata

@@ -1,0 +1,47 @@
+<!DOCTYPE html><html lang="ru"><head><title>Royal Wedding — свадебное агентство в Санкт-Петербурге</title>
+<!--
+  REAL CAPTURE — royal-wed.ru (live static HTML, go-stealth 2026-06-17).
+  This is the venue's REAL official site (the CTA target on piter.now article
+  56564): Telegram t.me/royal_wedding_spb, WhatsApp +7 (921) 956-18-40, primary
+  address Фурштатская ул. (SPb). The sibling royal-wedding.ru is the Moscow
+  front (t.me/royalweddingmsk, +7 925 ...) — a DIFFERENT city entity, dropped.
+
+  DNI / call-tracking trap (the headline case for social-link extraction):
+  the site runs Roistat dynamic-number-insertion. The visible (812) header
+  number ROTATES at runtime across proxy slots (operator witnessed 956-18-40,
+  439-18-55, 704-85-45 across 5 fetches). A raw-HTTP snapshot here shows the
+  static (812) 956-18-40 in the tel: href + 8x itemprop=telephone + og: meta —
+  but that slot is exactly what Roistat rewrites, so it must NOT be asserted as
+  the venue's stable number. The ONLY phone invariant on 100% of fetches (raw
+  or JS-rendered) is the hard-coded WhatsApp href +7 (921) 956-18-40 — the
+  agency's owned, stable contact, which is what shipped to the live article.
+  The resolver must return that social-link number, NOT the rotating (812).
+  Trimmed to the contact-bearing DOM; href/itemprop/property values verbatim.
+-->
+</head><body>
+<header class="header">
+  <div class="header_right">
+    <!-- Roistat-rotated DNI slot: this displayed tel: is NOT stable. -->
+    <a href="tel:+78129561840" class="header_phone js-no-link" onclick="ym(27354206, 'reachGoal', 'phone_header'); return true;">+7 (812) 956-18-40</a>
+    <!-- Hard-coded, owned, DNI-immune social links: -->
+    <a href="https://api.whatsapp.com/send?phone=79219561840" target="_blank" rel="noopener" class="header_wa">WhatsApp</a>
+    <a href="https://t.me/royal_wedding_spb" target="_blank" rel="noopener" class="header_tg">Telegram</a>
+  </div>
+</header>
+<meta prefix="business: http://ogp.me/ns/business#" property="business:contact_data:phone_number" content="+7 8129561840"/>
+<meta property="business:contact_data:street_address" content="Марата 84А"/>
+<meta property="business:contact_data:locality" content="Санкт-Петербург"/>
+<!-- 8x SPb branch microdata, all carrying the Roistat-rotatable (812) slot -->
+<div itemscope itemtype="https://schema.org/LocalBusiness">
+  <meta itemprop="address" content="г. Санкт-Петербург, Фурштатская ул., 8">
+  <meta itemprop="telephone" content="+7 (812) 956-18-40">
+  <meta itemprop="telephone" content="+7 (812) 956-18-40">
+  <meta itemprop="telephone" content="+7 (812) 956-18-40">
+  <meta itemprop="telephone" content="+7 (812) 956-18-40">
+  <meta itemprop="telephone" content="+7 (812) 956-18-40">
+  <meta itemprop="telephone" content="+7 (812) 956-18-40">
+  <meta itemprop="telephone" content="+7 (812) 956-18-40">
+  <meta itemprop="telephone" content="+7 (812) 956-18-40">
+  <meta itemprop="name" content="Royal Wedding Санкт-Петербург">
+</div>
+</body></html>
