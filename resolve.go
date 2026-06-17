@@ -6,60 +6,108 @@ import (
 	"github.com/anatolykoptev/go-enriche/maps"
 )
 
-// fieldSource is the in-call provenance of a single extracted fact.
+// fieldSource is the provenance of a single extracted fact.
 //
-// This is INTERNAL to a single Enrich call — it is never written to the
-// returned Facts (the public contract stays bare *string), never cached, and
-// never crosses the module boundary. Its sole job is to let one authority
-// (resolveFacts) decide, per field, which writer wins when the official site
-// and the maps/aggregator/search sources disagree. Persisting source +
-// confidence onto Facts is a separate ONE_WAY change (Phase 3), deliberately
-// out of scope here.
+// Phase 2 kept this strictly in-call. Phase 3 (ONE_WAY) promotes the resolved
+// per-field {source, confidence} onto the public Result.Provenance so the
+// content path can PERSIST it and refuse to overwrite an operator-verified
+// value on re-enrich. The value carrier (extract.Facts) stays bare *string;
+// provenance rides alongside as a sidecar (additive, backward-compatible).
 type fieldSource int
 
-// Source priority, highest wins. official_site outranks every aggregator/maps/
-// search value: when the venue's own site yields a fact, that fact is
-// authoritative and a lower-priority source may never overwrite it. A lower
-// source still FILLS a field the site left empty (graceful degradation for the
-// many RU SMBs that are VK/2GIS-only).
+// Source priority, highest wins. operator_verified outranks everything: a value
+// the operator hand-verified (e.g. the stable social-link phone shipped to a
+// live article) must NEVER be downgraded or replaced by an enrich-derived
+// value. Below it, official_site outranks every aggregator/maps/search value.
+// A lower source still FILLS a field the higher one left empty (graceful
+// degradation for the many RU SMBs that are VK/2GIS-only).
 const (
-	sourceNone         fieldSource = iota // absent — any source may fill
-	sourceSearch                          // search snippet regex
-	sourceMaps                            // 2GIS / Yandex org card
-	sourceAggregator                      // (reserved) zoon/restoclub/afisha card
-	sourceOfficialSite                    // the venue's own site (tel: href / JSON-LD / regex)
+	sourceNone             fieldSource = iota // absent — any source may fill
+	sourceSearch                              // search snippet regex
+	sourceMaps                                // 2GIS / Yandex org card
+	sourceAggregator                          // (reserved) zoon/restoclub/afisha card
+	sourceOfficialSite                        // the venue's own site (tel: href / JSON-LD / regex)
+	sourceOperatorVerified                    // operator hand-verified — top authority, never overwritten
+)
+
+// Source provenance strings — the on-the-wire values persisted in the cache and
+// read by the content layer. Defined once so String/parse stay in sync.
+const (
+	srcStrOperatorVerified = "operator_verified"
+	srcStrOfficialSite     = "official_site"
+	srcStrAggregator       = "aggregator"
+	srcStrMaps             = "maps"
+	srcStrSearch           = "search"
+	srcStrUnknown          = "unknown"
 )
 
 func (s fieldSource) String() string {
 	switch s {
+	case sourceOperatorVerified:
+		return srcStrOperatorVerified
 	case sourceOfficialSite:
-		return "official_site"
+		return srcStrOfficialSite
 	case sourceAggregator:
-		return "aggregator"
+		return srcStrAggregator
 	case sourceMaps:
-		return "maps"
+		return srcStrMaps
 	case sourceSearch:
-		return "search"
+		return srcStrSearch
 	default:
-		return "none"
+		return srcStrUnknown
 	}
 }
 
-// factProvenance records, for one in-flight Enrich call, which source last
-// won each field. Zero value = all sourceNone (every field absent / fillable).
+// confidence is the coarse, agent-facing trust bucket for a resolved fact.
+// Three buckets on purpose — consumers branch on high/medium/low, not a float.
+type confidence string
+
+const (
+	confHigh   confidence = "high"
+	confMedium confidence = "medium"
+	confLow    confidence = "low"
+)
+
+// confidenceFor derives the agent-facing confidence from the winning source
+// (ADR-006 table). operator_verified and official_site are high-trust; every
+// aggregator/maps/search value is low (the agent should omit or mark
+// «уточняйте»). A finer official_site gradation (medium for not-own-domain,
+// low for regex-only) is layered on later by the extractor/DNI detector, which
+// can DOWNGRADE via setConfidence; this base mapping is the floor.
+func confidenceFor(src fieldSource) confidence {
+	switch src {
+	case sourceOperatorVerified, sourceOfficialSite:
+		return confHigh
+	case sourceAggregator, sourceMaps, sourceSearch:
+		return confLow
+	default:
+		return confLow
+	}
+}
+
+// fieldProv is the resolved provenance of one field: which source last won and
+// the derived confidence bucket.
+type fieldProv struct {
+	source fieldSource
+	conf   confidence
+}
+
+// factProvenance records, for one Enrich call, which source won each field and
+// at what confidence. Zero value = all sourceNone (every field absent).
 type factProvenance struct {
-	placeName fieldSource
-	address   fieldSource
-	phone     fieldSource
-	website   fieldSource
-	hours     fieldSource
-	price     fieldSource
+	placeName fieldProv
+	address   fieldProv
+	phone     fieldProv
+	website   fieldProv
+	hours     fieldProv
+	price     fieldProv
 }
 
 // resolver is the SINGLE authority that merges a value into Facts under
 // source-priority. It collapses what used to be two independent writers
 // (mergeOrgDataToFacts for maps + the wholesale ExtractFactsForCity assign for
-// the site) into one comparator so the official site deterministically wins.
+// the site) into one comparator so the official site deterministically wins,
+// while operator_verified beats even the site.
 type resolver struct {
 	facts *Facts
 	prov  *factProvenance
@@ -68,32 +116,29 @@ type resolver struct {
 
 // set merges one field value at the given source priority.
 //
-// Rule (encodes the operator's "on conflict, the official site wins"):
+// Rule (encodes "operator_verified > official_site > aggregator > maps >
+// search", and the operator's "on conflict, the official site wins"):
 //   - higher-or-equal source than the field's current owner → take the value
 //     (equal lets a later same-priority pass refresh, harmless);
-//   - strictly lower source → fill ONLY if the field is still absent.
+//   - strictly lower source → fill ONLY if the field is still absent;
+//   - the winning source's confidence is derived and recorded alongside.
 //
 // Conflict telemetry fires whenever two DIFFERENT-priority sources offer a
-// genuinely DIFFERENT value for the same field — regardless of merge order:
-//   - higher source overrides a present, differing lower value (override case);
-//   - lower source is REJECTED because a higher source already owns a differing
-//     value (rejection case).
-//
-// This makes enrich_conflict_total{field} order-INDEPENDENT (the resolved value
-// already is): site-then-maps and maps-then-site both count the same conflict.
-func (r *resolver) set(dst **string, owner *fieldSource, val string, src fieldSource, field string) {
+// genuinely DIFFERENT value for the same field — order-INDEPENDENTLY.
+func (r *resolver) set(dst **string, owner *fieldProv, val string, src fieldSource, field string) {
 	if val == "" {
 		return
 	}
 	// A real cross-source conflict: a value is present, the new value differs,
 	// and the two sources are at different priorities (neither absent).
-	if *dst != nil && **dst != val && src != *owner && *owner > sourceNone && src > sourceNone {
+	if *dst != nil && **dst != val && src != owner.source && owner.source > sourceNone && src > sourceNone {
 		r.m.conflict(field)
 	}
-	if src >= *owner {
+	if src >= owner.source {
 		v := val
 		*dst = &v
-		*owner = src
+		owner.source = src
+		owner.conf = confidenceFor(src)
 		return
 	}
 	// Strictly lower source: fill the gap only (never overrides; the conflict,
@@ -101,8 +146,23 @@ func (r *resolver) set(dst **string, owner *fieldSource, val string, src fieldSo
 	if *dst == nil {
 		v := val
 		*dst = &v
-		*owner = src
+		owner.source = src
+		owner.conf = confidenceFor(src)
 	}
+}
+
+// seedOperatorValues injects operator-verified field values at the top
+// priority BEFORE any fetch/maps/search runs, so no enrich-derived value can
+// overwrite them. Empty values are skipped (no operator override for that
+// field). This is the persistence-survival path: the content layer re-supplies
+// a previously operator-verified phone/price on every re-enrich.
+func (r *resolver) seedOperatorValues(s SeedFacts) {
+	r.set(&r.facts.PlaceName, &r.prov.placeName, s.PlaceName, sourceOperatorVerified, "place_name")
+	r.set(&r.facts.Address, &r.prov.address, s.Address, sourceOperatorVerified, "address")
+	r.set(&r.facts.Phone, &r.prov.phone, s.Phone, sourceOperatorVerified, "phone")
+	r.set(&r.facts.Website, &r.prov.website, s.Website, sourceOperatorVerified, "website")
+	r.set(&r.facts.Hours, &r.prov.hours, s.Hours, sourceOperatorVerified, "hours")
+	r.set(&r.facts.Price, &r.prov.price, s.Price, sourceOperatorVerified, "price")
 }
 
 // mergeOrg merges maps OrgData under sourceMaps. Coordinates keep the existing
@@ -121,23 +181,17 @@ func (r *resolver) mergeOrg(od *maps.OrgData) {
 }
 
 // mergeSite merges the official-site extraction (extract.Facts) under
-// sourceOfficialSite. Every present site field wins over any maps/search value;
-// PlaceName from the site, if the site labelled it, also wins. Coordinates are
-// intentionally NOT taken from the site here — ExtractFactsForCity never reads
-// page geo and seedSourceCoords owns the coord authority.
+// sourceOfficialSite. Every present site field wins over any maps/search value
+// (but never over an operator_verified seed). Coordinates are intentionally
+// NOT taken from the site here — ExtractFactsForCity never reads page geo and
+// seedSourceCoords owns the coord authority.
 func (r *resolver) mergeSite(sf extract.Facts) {
-	deref := func(p *string) string {
-		if p == nil {
-			return ""
-		}
-		return *p
-	}
-	r.set(&r.facts.PlaceName, &r.prov.placeName, deref(sf.PlaceName), sourceOfficialSite, "place_name")
-	r.set(&r.facts.Address, &r.prov.address, deref(sf.Address), sourceOfficialSite, "address")
-	r.set(&r.facts.Phone, &r.prov.phone, deref(sf.Phone), sourceOfficialSite, "phone")
-	r.set(&r.facts.Website, &r.prov.website, deref(sf.Website), sourceOfficialSite, "website")
-	r.set(&r.facts.Hours, &r.prov.hours, deref(sf.Hours), sourceOfficialSite, "hours")
-	r.set(&r.facts.Price, &r.prov.price, deref(sf.Price), sourceOfficialSite, "price")
+	r.set(&r.facts.PlaceName, &r.prov.placeName, derefStr(sf.PlaceName), sourceOfficialSite, "place_name")
+	r.set(&r.facts.Address, &r.prov.address, derefStr(sf.Address), sourceOfficialSite, "address")
+	r.set(&r.facts.Phone, &r.prov.phone, derefStr(sf.Phone), sourceOfficialSite, "phone")
+	r.set(&r.facts.Website, &r.prov.website, derefStr(sf.Website), sourceOfficialSite, "website")
+	r.set(&r.facts.Hours, &r.prov.hours, derefStr(sf.Hours), sourceOfficialSite, "hours")
+	r.set(&r.facts.Price, &r.prov.price, derefStr(sf.Price), sourceOfficialSite, "price")
 	// PlaceType / EventDate are site-only fields (maps never provides them);
 	// take them directly without a comparator.
 	if sf.PlaceType != nil && r.facts.PlaceType == nil {
@@ -151,21 +205,15 @@ func (r *resolver) mergeSite(sf extract.Facts) {
 // mergeSearchFacts folds facts already extracted from a search-DISCOVERED page
 // (the no-primary-URL fallback) in at sourceSearch — the lowest priority. These
 // pages are not the venue's own site, so their facts only fill still-absent
-// fields and never override a maps or official-site value. Coordinates keep the
-// fill-if-absent behaviour from the former mergeFacts.
+// fields and never override a maps/official-site/operator value. Coordinates
+// keep the fill-if-absent behaviour from the former mergeFacts.
 func (r *resolver) mergeSearchFacts(sf extract.Facts) {
-	deref := func(p *string) string {
-		if p == nil {
-			return ""
-		}
-		return *p
-	}
-	r.set(&r.facts.PlaceName, &r.prov.placeName, deref(sf.PlaceName), sourceSearch, "place_name")
-	r.set(&r.facts.Address, &r.prov.address, deref(sf.Address), sourceSearch, "address")
-	r.set(&r.facts.Phone, &r.prov.phone, deref(sf.Phone), sourceSearch, "phone")
-	r.set(&r.facts.Website, &r.prov.website, deref(sf.Website), sourceSearch, "website")
-	r.set(&r.facts.Hours, &r.prov.hours, deref(sf.Hours), sourceSearch, "hours")
-	r.set(&r.facts.Price, &r.prov.price, deref(sf.Price), sourceSearch, "price")
+	r.set(&r.facts.PlaceName, &r.prov.placeName, derefStr(sf.PlaceName), sourceSearch, "place_name")
+	r.set(&r.facts.Address, &r.prov.address, derefStr(sf.Address), sourceSearch, "address")
+	r.set(&r.facts.Phone, &r.prov.phone, derefStr(sf.Phone), sourceSearch, "phone")
+	r.set(&r.facts.Website, &r.prov.website, derefStr(sf.Website), sourceSearch, "website")
+	r.set(&r.facts.Hours, &r.prov.hours, derefStr(sf.Hours), sourceSearch, "hours")
+	r.set(&r.facts.Price, &r.prov.price, derefStr(sf.Price), sourceSearch, "price")
 	if sf.PlaceType != nil && r.facts.PlaceType == nil {
 		r.facts.PlaceType = sf.PlaceType
 	}
@@ -179,24 +227,18 @@ func (r *resolver) mergeSearchFacts(sf extract.Facts) {
 }
 
 // mergeSnippet merges search-snippet facts under sourceSearch (lowest). Only
-// fills still-absent fields — never overrides site/maps. Uses the existing
-// extract.ExtractSnippetFacts gates by snapshotting onto a scratch Facts then
-// folding the result in at sourceSearch priority.
+// fills still-absent fields — never overrides site/maps/operator. Uses the
+// existing extract.ExtractSnippetFacts gates by snapshotting onto a scratch
+// Facts then folding the result in at sourceSearch priority.
 func (r *resolver) mergeSnippet(text string) {
 	if text == "" {
 		return
 	}
 	var scratch extract.Facts
 	extract.ExtractSnippetFacts(text, &scratch)
-	deref := func(p *string) string {
-		if p == nil {
-			return ""
-		}
-		return *p
-	}
-	r.set(&r.facts.Address, &r.prov.address, deref(scratch.Address), sourceSearch, "address")
-	r.set(&r.facts.Phone, &r.prov.phone, deref(scratch.Phone), sourceSearch, "phone")
-	r.set(&r.facts.Price, &r.prov.price, deref(scratch.Price), sourceSearch, "price")
+	r.set(&r.facts.Address, &r.prov.address, derefStr(scratch.Address), sourceSearch, "address")
+	r.set(&r.facts.Phone, &r.prov.phone, derefStr(scratch.Phone), sourceSearch, "phone")
+	r.set(&r.facts.Price, &r.prov.price, derefStr(scratch.Price), sourceSearch, "price")
 }
 
 // phoneSource returns the winning phone's source string for telemetry, or ""
@@ -205,7 +247,35 @@ func (r *resolver) phoneSource() string {
 	if r.facts.Phone == nil {
 		return ""
 	}
-	return r.prov.phone.String()
+	return r.prov.phone.source.String()
+}
+
+// snapshot exports the resolved per-field provenance onto the public,
+// persistable Provenance struct. Only fields that resolved to a value carry a
+// non-empty source; an absent field stays zero-valued (omitempty on the wire).
+func (r *resolver) snapshot() Provenance {
+	conv := func(p fieldProv, present bool) FieldProvenance {
+		if !present || p.source == sourceNone {
+			return FieldProvenance{}
+		}
+		return FieldProvenance{Source: p.source.String(), Confidence: string(p.conf)}
+	}
+	return Provenance{
+		PlaceName: conv(r.prov.placeName, r.facts.PlaceName != nil),
+		Address:   conv(r.prov.address, r.facts.Address != nil),
+		Phone:     conv(r.prov.phone, r.facts.Phone != nil),
+		Website:   conv(r.prov.website, r.facts.Website != nil),
+		Hours:     conv(r.prov.hours, r.facts.Hours != nil),
+		Price:     conv(r.prov.price, r.facts.Price != nil),
+	}
+}
+
+// derefStr returns the pointee or "" for a nil *string.
+func derefStr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 // siteHasAnyFact reports whether the official-site extraction yielded at least

@@ -99,6 +99,12 @@ func (e *Enricher) Enrich(ctx context.Context, item Item) (*Result, error) {
 	// site extraction both feed it; it enforces official_site > maps precedence.
 	r := &resolver{facts: &result.Facts, prov: &factProvenance{}, m: e.metrics}
 
+	// Operator-verified seed FIRST: pin any hand-verified field at the top
+	// source priority so no enrich-derived value (maps card, rotating DNI tel:,
+	// search snippet, even the official site) can overwrite it. The content
+	// layer re-supplies these on every re-enrich (persistence-survival path).
+	r.seedOperatorValues(item.Seed)
+
 	// Maps status check (places only). Fills facts at sourceMaps (lower
 	// priority) and returns a CANDIDATE closed-status — it no longer
 	// short-circuits before the official site is consulted. An empty status
@@ -133,6 +139,11 @@ func (e *Enricher) Enrich(ctx context.Context, item Item) (*Result, error) {
 	if item.URL == "" && result.Content == "" {
 		e.fetchSearchSources(ctx, item, result, r, closedStands)
 	}
+
+	// Export the resolved per-field provenance onto the public Result so the
+	// content layer can persist {source, confidence} and protect operator
+	// values on re-enrich (Phase 3 ONE_WAY contract).
+	result.Provenance = r.snapshot()
 
 	// Phone-source telemetry: report the winning phone's provenance once.
 	if item.Mode == ModePlaces {
@@ -277,9 +288,15 @@ func (e *Enricher) Search(ctx context.Context, query, timeRange string) (*search
 	return e.search.Search(ctx, query, timeRange)
 }
 
+// cacheSchemaVersion is bumped whenever the cached Result shape changes in a
+// way that must NOT be deserialized from an older blob. v2 = Phase 3: Result
+// gained the Provenance sidecar; an old (v1) blob has no provenance, so we move
+// to a fresh key namespace rather than silently reading provenance-less data.
+const cacheSchemaVersion = "v2"
+
 func cacheKey(item Item) string {
 	if item.URL != "" {
-		return "enriche:" + item.URL
+		return "enriche:" + cacheSchemaVersion + ":" + item.URL
 	}
-	return "enriche:search:" + item.Name
+	return "enriche:search:" + cacheSchemaVersion + ":" + item.Name
 }
