@@ -113,7 +113,7 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 	}
 
 	// Extract structured facts (wholesale struct assignment — overwrites Facts).
-	result.Facts = extract.ExtractFacts(html, item.URL)
+	result.Facts = extract.ExtractFactsForCity(html, item.URL, item.City)
 
 	// Re-seed source-provided coordinates: extract.ExtractFacts resets Facts to
 	// a zero-value struct (it never reads Latitude/Longitude from page markup),

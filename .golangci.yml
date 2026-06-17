@@ -66,6 +66,13 @@ linters:
       excludes:
         - G104  # unhandled errors — errcheck covers this
         - G304  # file path from variable — common in CLI tools
+        - G117  # exported field name matches a secret pattern (APIKey/Secret) —
+                #   false positive: these are config fields populated from env at
+                #   runtime, never hardcoded; gosec v2.10 added this name-based rule
+        - G704  # SSRF via taint analysis on first-party API clients (DaData,
+                #   2GIS) — false positive: the request HOST is a compile-time
+                #   const URL (daDataCleanURL / twoGISBaseURL); only query params
+                #   vary. gosec v2.10 taint analysis flags the constant-host Do()
 
   exclusions:
     presets:
