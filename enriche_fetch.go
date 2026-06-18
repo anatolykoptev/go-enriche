@@ -314,6 +314,13 @@ func contactFactCount(f extract.Facts) int {
 	if f.Address != nil {
 		n++
 	}
+	// A legal/registered address counts as a contact fact too — a /contacts page
+	// that surfaces ONLY a legal seat (no venue address/phone/hours/email) must
+	// still be adopted so its «Реквизиты» reach the consumer; otherwise the page
+	// would tie a contactless homepage and never merge.
+	if f.LegalAddress != nil {
+		n++
+	}
 	if f.Hours != nil {
 		n++
 	}

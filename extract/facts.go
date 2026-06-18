@@ -11,14 +11,26 @@ type Facts struct {
 	PlaceName *string
 	PlaceType *string
 	Address   *string
-	Phone     *string
-	Price     *string
-	Website   *string
-	Hours     *string
-	Email     *string
-	EventDate *string
-	Latitude  *float64
-	Longitude *float64
+	// LegalAddress holds a registered/legal-entity address (юридический адрес)
+	// extracted from the same page as a SEPARATE, additive sidecar — it is NEVER
+	// the venue's geo address. Many RU /contacts pages print BOTH the legal office
+	// (ИНН/ОГРН line, литера/помещение, postal index — the registered seat, often
+	// across the city or oblast from the venue) AND the venue's visiting address.
+	// Collapsing both into Address inverts precedence: a high-confidence
+	// official-site LEGAL address would overwrite the geo-correct (lower-confidence)
+	// maps VENUE address, and the card's address-string-driven map link would point
+	// at the office, not the venue. Keeping them distinct lets the resolver route
+	// the legal one here (rendered as «Реквизиты», never the map slot) and leave the
+	// venue slot to the maps/geo address. This is the split-identity-address fix.
+	LegalAddress *string
+	Phone        *string
+	Price        *string
+	Website      *string
+	Hours        *string
+	Email        *string
+	EventDate    *string
+	Latitude     *float64
+	Longitude    *float64
 
 	// PhonePoisoned is true when the official site carries a DNI/call-tracking
 	// vendor (Roistat/Calltouch/Comagic/Mango/Callibri/UIS) and has NO DNI-immune
@@ -60,7 +72,7 @@ func ExtractFactsForCity(html, pageURL, city string) Facts {
 		applyPlaceFacts(data, &facts)
 		applyArticleFacts(data, &facts)
 		applyEventFacts(data, &facts)
-		applyOrgFacts(data, &facts)
+		applyOrgFacts(data, html, &facts)
 	}
 
 	// Layer 2: regex fallback — only fills nil fields.
@@ -173,16 +185,18 @@ func applyContactOverride(html, city string, facts *Facts) {
 // element when the field is still nil. Fill-if-nil — a structured or labeled
 // address (Layer 1/2) is more precise and always wins.
 func applyAddressElement(html string, facts *Facts) {
-	if facts.Address != nil {
+	// Route through setAddressFact so a bare <address> legal seat fills
+	// LegalAddress, not Address. Skip the parse only when BOTH slots are filled
+	// (the venue slot may still be empty while LegalAddress is set, and vice
+	// versa — a contacts page can carry both in separate <address> blocks).
+	if facts.Address != nil && facts.LegalAddress != nil {
 		return
 	}
 	doc, err := documentFromHTML(html)
 	if err != nil || doc == nil {
 		return
 	}
-	if a := firstAddressElement(doc); a != nil {
-		facts.Address = a
-	}
+	firstAddressElements(doc, facts)
 }
 
 // applyEmail fills Facts.Email from the first mailto: link on the page when the
@@ -209,7 +223,7 @@ func applyPlaceFacts(data *structured.Data, facts *Facts) {
 	}
 	setIfNil(&facts.PlaceName, place.Name)
 	setIfNil(&facts.PlaceType, place.Type)
-	setIfValid(&facts.Address, place.Address, ValidateAddress)
+	setAddressIfValid(facts, place.Address)
 	setIfValid(&facts.Phone, place.Phone, ValidatePhone)
 	setIfNil(&facts.Website, place.Website)
 	setIfNil(&facts.Hours, place.Hours)
@@ -232,10 +246,10 @@ func applyEventFacts(data *structured.Data, facts *Facts) {
 	setIfNil(&facts.PlaceName, event.Name)
 	setIfNil(&facts.EventDate, event.StartDate)
 	setIfValid(&facts.Price, event.Price, ValidatePrice)
-	setIfValid(&facts.Address, event.Location, ValidateAddress)
+	setAddressIfValid(facts, event.Location)
 }
 
-func applyOrgFacts(data *structured.Data, facts *Facts) {
+func applyOrgFacts(data *structured.Data, html string, facts *Facts) {
 	org := data.FirstOrganization()
 	if org == nil {
 		return
@@ -243,15 +257,87 @@ func applyOrgFacts(data *structured.Data, facts *Facts) {
 	setIfNil(&facts.PlaceName, org.Name)
 	setIfNil(&facts.Website, org.URL)
 	setIfValid(&facts.Phone, org.Phone, ValidatePhone)
-	setIfValid(&facts.Address, org.Address, ValidateAddress)
+	// An Organization itemtype CAN be the registered legal entity, so its address
+	// CAN be the legal/registered seat — but only when a corroborating legal signal
+	// is present. A bare Organization block whose streetAddress is in fact the
+	// venue's visiting address (no separate Place block, no legal identifiers) must
+	// NOT have that address demoted to LegalAddress, or the venue loses its map slot
+	// (the same false-demote class as the литера-substring bug, via the provenance
+	// signal). Route to LegalAddress by PROVENANCE only when at least one corroborant
+	// holds; otherwise fall through to the STRING arm so a markerless venue address
+	// STAYS venue. This is a routing refinement — it adds no new writer of the
+	// Address slot (orgAddressIsLegal picks between the two existing routes).
+	if orgAddressIsLegal(org, html, facts) {
+		// Legal by corroborated provenance — e.g. drive-igora's seat (streetAddress
+		// of an Organization block whose item also carries ИНН), which carries no
+		// ИНН/ОГРН in the address string itself yet is unambiguously the legal seat.
+		setOrgAddressIfValid(facts, org.Address)
+	} else {
+		// No corroborant: the Org streetAddress is the only address signal and looks
+		// like a venue address — keep it in the venue slot via string classification.
+		setAddressIfValid(facts, org.Address)
+	}
 	setIfNil(&facts.Hours, org.Hours)
 }
 
-func applyRegexFallback(html string, facts *Facts) {
-	if facts.Address == nil {
-		if addr := regexAddress(html); addr != nil && ValidateAddress(*addr) {
-			facts.Address = addr
+// orgAddressIsLegal decides whether a schema.org/Organization streetAddress should
+// be treated as a legal/registered seat (→ LegalAddress) rather than a venue
+// visiting address (→ Address). The Organization itemtype ALONE is not enough —
+// many RU SMB sites wrap their single visiting address in an Organization block.
+// At least ONE corroborating legal signal is required:
+//
+//  1. the address STRING itself carries a strong legal marker (isLegalAddress —
+//     ИНН/ОГРН/ОГРНИП/КПП/юридический/реквизиты/entity-form), OR
+//  2. an ИНН/ОГРН/ОГРНИП/КПП (or taxID/vatID) appears anywhere in the Org item
+//     (org.HasLegalID), OR
+//  3. the Org item carries a legalName property (org.LegalName), OR
+//  4. the page ALSO carries a distinct venue address that DIFFERS from the Org
+//     streetAddress — i.e. a Place/LocalBusiness block already filled the venue
+//     slot, so the Org address is the OTHER (legal) one.
+//
+// A page-SCOPE legal-entity marker (an ИНН/ОГРН printed anywhere on the page, e.g.
+// in footer requisites) is DELIBERATELY NOT a corroborant. Footer requisites are
+// near-universal on RU venue sites, so keying on them re-opened the false-demote:
+// a venue page with footer ИНН/ОГРН plus a bare Organization block carrying the
+// venue's OWN visiting streetAddress would route that address to LegalAddress and
+// empty the map slot — the same class as the литера-substring bug, via a third
+// signal. Corroborant #4 already covers the only real live shape (a distinct
+// venue address present elsewhere), so the page-scope marker added false-demote
+// risk with no recall. A footer ИНН proves a legal entity exists on the page; it
+// does NOT prove the Org block's streetAddress is the registered seat.
+//
+// Absent ALL four, the lone Organization address is routed through the string arm
+// so a markerless venue address stays in the map slot. facts is read-only here.
+func orgAddressIsLegal(org *structured.Organization, html string, facts *Facts) bool {
+	if org.HasLegalID || org.LegalName != nil {
+		return true // corroborant #2 (in-item ИНН/ОГРН/taxID/vatID) / #3 (legalName)
+	}
+	if org.Address != nil && isLegalAddress(*org.Address) {
+		return true // corroborant #1 (legal marker in the address string itself)
+	}
+	// corroborant #4: the page carries a DISTINCT venue address that differs from
+	// the Org streetAddress — so the Org address is the OTHER (legal) one. The
+	// distinct venue can come from a Place/LocalBusiness block that already filled
+	// facts.Address (Layer 1, runs before this), OR from a visible <address> element
+	// (Layer 3.5, runs after this — so it is read here directly, read-only). This is
+	// the Игора-without-ИНН shape: a display:none Organization legal seat plus a
+	// visible <address> venue.
+	if org.Address != nil {
+		orgAddr := strings.TrimSpace(*org.Address)
+		if facts.Address != nil && strings.TrimSpace(*facts.Address) != orgAddr {
+			return true
 		}
+		if venue := firstVenueAddressElement(html); venue != nil &&
+			strings.TrimSpace(*venue) != orgAddr {
+			return true
+		}
+	}
+	return false
+}
+
+func applyRegexFallback(html string, facts *Facts) {
+	if addr := regexAddress(html); addr != nil && ValidateAddress(*addr) {
+		setAddressFact(facts, *addr)
 	}
 	if facts.Phone == nil {
 		if phone := regexPhone(html); phone != nil && ValidatePhone(*phone) {
@@ -272,10 +358,8 @@ func ExtractSnippetFacts(text string, facts *Facts) {
 	if text == "" || facts == nil {
 		return
 	}
-	if facts.Address == nil {
-		if addr := regexSubmatch(reSnippetAddress, text); addr != nil && ValidateAddress(*addr) {
-			facts.Address = addr
-		}
+	if addr := regexSubmatch(reSnippetAddress, text); addr != nil && ValidateAddress(*addr) {
+		setAddressFact(facts, *addr)
 	}
 	if facts.Phone == nil {
 		if phone := regexMatch(rePhone, text); phone != nil && ValidatePhone(*phone) {

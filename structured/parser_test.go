@@ -222,3 +222,77 @@ func assertStringPtr(t *testing.T, field string, got *string, want string) {
 		t.Errorf("%s: expected %q, got %q", field, want, *got)
 	}
 }
+
+// TestParse_Organization_LegalSignals verifies the corroborant signals the
+// extract layer reads to decide whether an Organization streetAddress is a legal
+// seat (HasLegalID / LegalName). A bare Organization with NO such signal exposes
+// neither — that is the case extract.orgAddressIsLegal must NOT treat as legal.
+func TestParse_Organization_LegalSignals(t *testing.T) {
+	t.Parallel()
+
+	t.Run("taxID property sets HasLegalID", func(t *testing.T) {
+		t.Parallel()
+		html := `<html><body><div itemscope itemtype="http://schema.org/Organization">
+<meta itemprop="name" content="ООО Игора Драйв"/>
+<meta itemprop="taxID" content="7801321150"/>
+<div itemprop="address" itemscope itemtype="http://schema.org/PostalAddress">
+<span itemprop="streetAddress">11-я В.О. линия, 38</span></div></div></body></html>`
+		org := parseOrg(t, html)
+		if !org.HasLegalID {
+			t.Errorf("HasLegalID = false, want true (taxID property present)")
+		}
+	})
+
+	t.Run("ИНН token inside a nested item sets HasLegalID", func(t *testing.T) {
+		t.Parallel()
+		html := `<html><body><div itemscope itemtype="http://schema.org/Organization">
+<meta itemprop="name" content="Студия"/>
+<div itemprop="address" itemscope itemtype="http://schema.org/PostalAddress">
+<span itemprop="streetAddress">ул. Ленина, 5, ИНН 7813045678</span></div></div></body></html>`
+		org := parseOrg(t, html)
+		if !org.HasLegalID {
+			t.Errorf("HasLegalID = false, want true (ИНН token in nested streetAddress)")
+		}
+	})
+
+	t.Run("legalName property is exposed", func(t *testing.T) {
+		t.Parallel()
+		html := `<html><body><div itemscope itemtype="http://schema.org/Organization">
+<meta itemprop="name" content="Волна"/>
+<meta itemprop="legalName" content="ООО «Волна»"/>
+<div itemprop="address" itemscope itemtype="http://schema.org/PostalAddress">
+<span itemprop="streetAddress">Литейный, 55</span></div></div></body></html>`
+		org := parseOrg(t, html)
+		if org.LegalName == nil || !strings.Contains(*org.LegalName, "Волна") {
+			t.Errorf("LegalName = %v, want the legalName value", org.LegalName)
+		}
+	})
+
+	t.Run("bare Organization exposes NO legal signal", func(t *testing.T) {
+		t.Parallel()
+		html := `<html><body><div itemscope itemtype="http://schema.org/Organization">
+<meta itemprop="name" content="Кафе Уют"/>
+<div itemprop="address" itemscope itemtype="http://schema.org/PostalAddress">
+<span itemprop="streetAddress">Невский проспект, 28</span></div></div></body></html>`
+		org := parseOrg(t, html)
+		if org.HasLegalID {
+			t.Errorf("HasLegalID = true, want false (no ИНН/ОГРН/taxID anywhere)")
+		}
+		if org.LegalName != nil {
+			t.Errorf("LegalName = %q, want nil (no legalName property)", *org.LegalName)
+		}
+	})
+}
+
+func parseOrg(t *testing.T, html string) *Organization {
+	t.Helper()
+	data, err := Parse(strings.NewReader(html), "text/html", "https://example.com")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	org := data.FirstOrganization()
+	if org == nil {
+		t.Fatal("expected Organization, got nil")
+	}
+	return org
+}
