@@ -42,9 +42,9 @@ type SiteContacts struct {
 	// page, e.g. body), or "" when Phone is nil.
 	PhoneRegion string
 	// Email is the first mailto: address found, trimmed of any query string.
-	// NOTE: Facts has no Email field yet, so applyContactOverride does not
-	// consume this — it is groundwork for the source-priority resolver (P2),
-	// extracted here so the single DOM pass covers all contact facts.
+	// Consumed by applyEmail (extract/facts.go), which fills Facts.Email from
+	// firstMailto. Email is not subject to call-tracking/DNI rotation, so it
+	// fills directly (no poison gate) — the venue's own mailto: is authoritative.
 	Email *string
 }
 
@@ -235,6 +235,25 @@ func microdataPhone(doc *goquery.Document) *string {
 			v = strings.TrimSpace(s.Text())
 		}
 		if ValidatePhone(v) {
+			found = &v
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+// firstAddressElement returns the text of the first HTML <address> element
+// whose content passes ValidateAddress. The <address> element is an explicit
+// semantic signal of a venue's contact address — the regex address path needs
+// an «адрес:»/«address:» label prefix, which a bare <address> block lacks, so a
+// contacts page that renders its address only inside <address> would otherwise
+// be missed. ZERO network I/O. Returns nil when no valid <address> is present.
+func firstAddressElement(doc *goquery.Document) *string {
+	var found *string
+	doc.Find("address").EachWithBreak(func(_ int, s *goquery.Selection) bool {
+		v := strings.TrimSpace(s.Text())
+		if ValidateAddress(v) {
 			found = &v
 			return false
 		}
