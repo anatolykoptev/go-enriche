@@ -46,14 +46,22 @@ const homeLinksContactsNoAddr = `<!DOCTYPE html><html lang="ru"><head><title>И�
 
 // contactsPageLegalOnlyWithFields is the /contacts subpage that carries a legal
 // registered seat (В.О. линия, литера/помещение) — but NO venue visiting
-// address — plus an email and hours. MIRRORS THE LIVE drive-igora.ru/contacts
-// DOM (ox-browser fast-fetch, 2026-06-18): the legal seat is the streetAddress of
-// a display:none schema.org/Organization footer block (caught as LEGAL by
-// PROVENANCE — it carries no ИНН in the address string itself), while the
-// ИНН/ООО print inside an hours block. The venue's geo address comes only from
-// the maps card here. Before the field split the legal seat (official_site/high)
-// overwrote the maps venue address (maps/low) and the card's map link pointed at
-// the city-center office instead of the venue.
+// address — plus an email and hours. Models the drive-igora.ru/contacts shape:
+// the legal seat is the streetAddress of a display:none schema.org/Organization
+// footer block, and the entity's ИНН is carried as an IN-ITEM taxID property
+// (corroborant #2, in-item) so the Org block is provably a registered entity and
+// its address routes to LegalAddress. The venue's geo address comes only from the
+// maps card here.
+//
+// (Round 3: this fixture previously relied on the removed page-SCOPE corroborant
+// #2 — the bare «ООО «…», ИНН …» <p> text — to classify the seat as legal. Page
+// scope cannot tell "the Org block is a legal entity" from "an unrelated footer
+// ИНН sits on a venue page", so it was removed. The reliable signal is the
+// IN-ITEM taxID, which schema.org defines on Organization and which the recursive
+// itemHasLegalID walk reads scope-correctly. The <p> text is kept for fidelity but
+// is no longer load-bearing.) Before the field split the legal seat
+// (official_site/high) overwrote the maps venue address (maps/low) and the card's
+// map link pointed at the city-center office instead of the venue.
 const contactsPageLegalOnlyWithFields = `<!DOCTYPE html><html lang="ru"><head><title>Контакты</title></head>
 <body><div class="contacts">
 <dl><dt>Режим работы</dt><dd>ежедневно 10:00-21:00</dd></dl>
@@ -63,6 +71,7 @@ const contactsPageLegalOnlyWithFields = `<!DOCTYPE html><html lang="ru"><head><t
 <footer></footer>
 <div style="display:none" itemscope itemtype="http://schema.org/Organization">
 <meta itemprop="name" content="Игора"/>
+<span itemprop="taxID">7801321150</span>
 <span itemprop="email">info@drive-igora.ru</span>
 <div itemprop="address" itemscope itemtype="http://schema.org/PostalAddress">
 <span itemprop="streetAddress">11-я В.О. линия, дом № 38, литера А, помещение 91</span>
@@ -189,7 +198,10 @@ func TestEnrich_VenueOnlyContactsAddress_WinsVenueSlot(t *testing.T) {
 // contactsPageLegalOnly is a /contacts page whose ONLY address is a legal seat,
 // printed as the streetAddress of a schema.org/Organization block (live-DOM
 // shape) — no venue visiting address anywhere on the page. The seat is caught as
-// LEGAL by PROVENANCE (Organization itemtype), not by any литера-in-string.
+// LEGAL by the IN-ITEM corroborant #2: the Organization carries its ИНН as a
+// taxID property, so the block is provably a registered entity and its address is
+// the registered seat (not by any литера-in-string, and not by the removed
+// page-scope marker).
 const contactsPageLegalOnly = `<!DOCTYPE html><html lang="ru"><head><title>Контакты</title></head>
 <body><div class="contacts">
 <dl><dt>Режим работы</dt><dd>Пн-Пт 09:00-18:00</dd></dl>
@@ -199,6 +211,7 @@ const contactsPageLegalOnly = `<!DOCTYPE html><html lang="ru"><head><title>Ко�
 <footer></footer>
 <div style="display:none" itemscope itemtype="http://schema.org/Organization">
 <meta itemprop="name" content="Студия"/>
+<span itemprop="taxID">7813045678</span>
 <span itemprop="email">office@studio.ru</span>
 <div itemprop="address" itemscope itemtype="http://schema.org/PostalAddress">
 <span itemprop="streetAddress">ул. Профессора Попова, 37, литера Щ, помещение 14-Н</span>

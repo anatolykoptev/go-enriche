@@ -295,6 +295,17 @@ func applyOrgFacts(data *structured.Data, html string, facts *Facts) {
 //     streetAddress — i.e. a Place/LocalBusiness block already filled the venue
 //     slot, so the Org address is the OTHER (legal) one.
 //
+// A page-SCOPE legal-entity marker (an ИНН/ОГРН printed anywhere on the page, e.g.
+// in footer requisites) is DELIBERATELY NOT a corroborant. Footer requisites are
+// near-universal on RU venue sites, so keying on them re-opened the false-demote:
+// a venue page with footer ИНН/ОГРН plus a bare Organization block carrying the
+// venue's OWN visiting streetAddress would route that address to LegalAddress and
+// empty the map slot — the same class as the литера-substring bug, via a third
+// signal. Corroborant #4 already covers the only real live shape (a distinct
+// venue address present elsewhere), so the page-scope marker added false-demote
+// risk with no recall. A footer ИНН proves a legal entity exists on the page; it
+// does NOT prove the Org block's streetAddress is the registered seat.
+//
 // Absent ALL four, the lone Organization address is routed through the string arm
 // so a markerless venue address stays in the map slot. facts is read-only here.
 func orgAddressIsLegal(org *structured.Organization, html string, facts *Facts) bool {
@@ -303,15 +314,6 @@ func orgAddressIsLegal(org *structured.Organization, html string, facts *Facts) 
 	}
 	if org.Address != nil && isLegalAddress(*org.Address) {
 		return true // corroborant #1 (legal marker in the address string itself)
-	}
-	// corroborant #2 (page scope): the live RU /contacts DOM prints the registration
-	// identifier (ООО «…», ИНН …) as page text adjacent to a display:none
-	// Organization block rather than inside the microdata item (the Игора shape), so
-	// the in-item scan above misses it. A legal-entity marker anywhere on the page
-	// the Org appears on still corroborates that the Org block describes a registered
-	// entity and its address is the legal seat.
-	if pageHasLegalEntityMarker(html) {
-		return true
 	}
 	// corroborant #4: the page carries a DISTINCT venue address that differs from
 	// the Org streetAddress — so the Org address is the OTHER (legal) one. The

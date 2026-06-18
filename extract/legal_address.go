@@ -58,41 +58,6 @@ func isLegalAddress(addr string) bool {
 	return reLegalAddressMarker.MatchString(addr)
 }
 
-// rePageLegalEntityMarker matches a registration-grade legal-entity marker in PAGE
-// text (HTML included). It is the corroborant the PROVENANCE arm uses to confirm a
-// schema.org/Organization block describes a registered legal entity before routing
-// its streetAddress to LegalAddress (see extract.orgAddressIsLegal, corroborant #2,
-// page scope). Live RU /contacts pages print «ООО «…», ИНН …» as page text next to
-// a display:none Organization microdata block, so the in-item property scan
-// (structured.Organization.HasLegalID) misses it.
-//
-// Signals: a tax/registration ID (ИНН/ОГРН/ОГРНИП/КПП) or an explicit legal label
-// (юридический/реквизиты). Company-form tokens (ООО/ОАО/ЗАО/ПАО/АО/ИП) are bound
-// with a Cyrillic-safe boundary — a separator OR a markup char (< >) on each side —
-// so «ООО» inside «<p>ООО «…»</p>» matches while a street name embedding the
-// letters («Заозёрная», «Липецкая») does not. This is DELIBERATELY narrower than a
-// venue-address check: it fires only on an unambiguous registration marker, never
-// on литера / помещение / a postal index, so it can never make a markerless venue
-// page demote its own address.
-var rePageLegalEntityMarker = regexp.MustCompile(
-	`(?i)(?:` +
-		`юридическ|реквизит|инн|огрнип|огрн|кпп` + // labels + tax / registration IDs
-		`|(?:^|[\s,.;:«"()<>])(?:ооо|оао|зао|пао|ао|ип)(?:[\s,.;:»"()<>]|$)` + // company forms
-		`)`,
-)
-
-// pageHasLegalEntityMarker reports whether the page carries a registration-grade
-// legal-entity marker (see rePageLegalEntityMarker). Used as a page-scope
-// corroborant for the Organization-address PROVENANCE arm: only when such a marker
-// is present does a bare Organization streetAddress route to LegalAddress; absent
-// it, the address stays in the venue slot (the false-demote guard).
-func pageHasLegalEntityMarker(html string) bool {
-	if html == "" {
-		return false
-	}
-	return rePageLegalEntityMarker.MatchString(html)
-}
-
 // setAddressFact routes a validated address candidate to the correct sidecar slot
 // using STRING-based classification: an address carrying a strong legal marker
 // (isLegalAddress) fills LegalAddress, otherwise it fills the venue Address slot.
@@ -117,15 +82,19 @@ func setAddressFact(facts *Facts, candidate string) {
 	fillVenueAddress(facts, candidate)
 }
 
-// setOrgAddressFact routes a schema.org/Organization-sourced address. The
-// Organization itemtype is the registered legal entity (schema.org semantics:
-// Organization = the legal body; Place / LocalBusiness = the place to visit), so
-// its address is the registered/legal seat and ALWAYS fills LegalAddress, NEVER
-// the venue Address slot — regardless of the string. This is the PROVENANCE arm of
-// classification: it catches Игора's legal seat («…дом № 38, литера А, помещение
-// 91…»), which carries no ИНН/ОГРН in the address string itself and so is
-// invisible to the string-based isLegalAddress, yet is unambiguously the legal
-// address because it is the Organization block's streetAddress.
+// setOrgAddressFact fills LegalAddress (fill-if-nil) with a schema.org/Organization
+// streetAddress that the caller has ALREADY determined to be the registered/legal
+// seat. It is the PROVENANCE arm of classification, but it is NOT unconditional:
+// applyOrgFacts routes an Organization address here ONLY when orgAddressIsLegal is
+// satisfied (a corroborating legal signal — string marker, in-item ИНН/ОГРН via
+// org.HasLegalID, legalName, or a distinct venue address present elsewhere). When
+// NO corroborant holds, applyOrgFacts instead routes the address through the STRING
+// arm (setAddressFact), so a markerless lone Organization address whose
+// streetAddress is in fact the venue's visiting address STAYS in the venue slot —
+// it is never demoted to LegalAddress merely because the itemtype is Organization
+// (the false-demote guard). When a corroborant DOES hold, this catches a legal seat
+// like Игора's («…дом № 38, литера А, помещение 91…») that carries no ИНН/ОГРН in
+// the address string itself and so is invisible to the string-based isLegalAddress.
 func setOrgAddressFact(facts *Facts, candidate string) {
 	if candidate == "" {
 		return
