@@ -109,6 +109,7 @@ type factProvenance struct {
 	phone     fieldProv
 	website   fieldProv
 	hours     fieldProv
+	email     fieldProv
 	price     fieldProv
 }
 
@@ -198,6 +199,7 @@ func (r *resolver) seedOperatorValues(s SeedFacts) {
 	r.set(&r.facts.Phone, &r.prov.phone, s.Phone, sourceOperatorVerified, "phone")
 	r.set(&r.facts.Website, &r.prov.website, s.Website, sourceOperatorVerified, "website")
 	r.set(&r.facts.Hours, &r.prov.hours, s.Hours, sourceOperatorVerified, "hours")
+	r.set(&r.facts.Email, &r.prov.email, s.Email, sourceOperatorVerified, "email")
 	r.set(&r.facts.Price, &r.prov.price, s.Price, sourceOperatorVerified, "price")
 }
 
@@ -235,6 +237,7 @@ func (r *resolver) mergeSite(sf extract.Facts) {
 	}
 	r.set(&r.facts.Website, &r.prov.website, derefStr(sf.Website), sourceOfficialSite, "website")
 	r.set(&r.facts.Hours, &r.prov.hours, derefStr(sf.Hours), sourceOfficialSite, "hours")
+	r.set(&r.facts.Email, &r.prov.email, derefStr(sf.Email), sourceOfficialSite, "email")
 	r.set(&r.facts.Price, &r.prov.price, derefStr(sf.Price), sourceOfficialSite, "price")
 	// PlaceType / EventDate are site-only fields (maps never provides them);
 	// take them directly without a comparator.
@@ -257,6 +260,7 @@ func (r *resolver) mergeSearchFacts(sf extract.Facts) {
 	r.set(&r.facts.Phone, &r.prov.phone, derefStr(sf.Phone), sourceSearch, "phone")
 	r.set(&r.facts.Website, &r.prov.website, derefStr(sf.Website), sourceSearch, "website")
 	r.set(&r.facts.Hours, &r.prov.hours, derefStr(sf.Hours), sourceSearch, "hours")
+	r.set(&r.facts.Email, &r.prov.email, derefStr(sf.Email), sourceSearch, "email")
 	r.set(&r.facts.Price, &r.prov.price, derefStr(sf.Price), sourceSearch, "price")
 	if sf.PlaceType != nil && r.facts.PlaceType == nil {
 		r.facts.PlaceType = sf.PlaceType
@@ -310,6 +314,7 @@ func (r *resolver) snapshot() Provenance {
 		Phone:     conv(r.prov.phone, r.facts.Phone != nil),
 		Website:   conv(r.prov.website, r.facts.Website != nil),
 		Hours:     conv(r.prov.hours, r.facts.Hours != nil),
+		Email:     conv(r.prov.email, r.facts.Email != nil),
 		Price:     conv(r.prov.price, r.facts.Price != nil),
 	}
 }
@@ -328,7 +333,7 @@ func derefStr(p *string) string {
 func siteHasAnyFact(f extract.Facts) bool {
 	return f.PlaceName != nil || f.PlaceType != nil || f.Address != nil ||
 		f.Phone != nil || f.Price != nil || f.Website != nil ||
-		f.Hours != nil || f.EventDate != nil
+		f.Hours != nil || f.Email != nil || f.EventDate != nil
 }
 
 // hasContactFacts reports whether the extracted facts carry at least one
@@ -340,7 +345,8 @@ func siteHasAnyFact(f extract.Facts) bool {
 // detected from the raw HTML — a render would only show the rotating proxy, so
 // it must NOT re-trigger render for that field).
 func hasContactFacts(f extract.Facts) bool {
-	return f.Phone != nil || f.PhonePoisoned || f.Address != nil || f.Hours != nil
+	return f.Phone != nil || f.PhonePoisoned || f.Address != nil ||
+		f.Hours != nil || f.Email != nil
 }
 
 // siteRefutesClosed reports whether a reachable, active official-site fetch

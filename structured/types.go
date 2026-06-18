@@ -42,4 +42,5 @@ type Organization struct {
 	URL     *string
 	Phone   *string
 	Address *string
+	Hours   *string
 }

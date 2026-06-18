@@ -15,6 +15,7 @@ type Facts struct {
 	Price     *string
 	Website   *string
 	Hours     *string
+	Email     *string
 	EventDate *string
 	Latitude  *float64
 	Longitude *float64
@@ -70,6 +71,28 @@ func ExtractFactsForCity(html, pageURL, city string) Facts {
 	// only fills a still-nil phone. With a city hint, a candidate local to the
 	// city (any region) overrides — that is the local-area-code rule.
 	applyContactOverride(html, city, &facts)
+
+	// Layer 3.5: bare <address> element. The regex address path needs an
+	// «адрес:» label; a contacts page that renders its address only inside an
+	// <address> block (common on contacts subpages) would be missed. Fill-if-nil
+	// so a structured/labeled address (Layer 1/2) always wins.
+	applyAddressElement(html, &facts)
+
+	// Layer 4: site-own email (first mailto:). A venue's own mailto: link is a
+	// reliable contact fact; no call-tracking rotation applies to email, so it
+	// fills directly when present (fill-if-nil — never clobber a structured
+	// email a future Layer 1 could supply).
+	applyEmail(html, &facts)
+
+	// Layer 5: visible Russian opening-hours block («Режим/Часы/Время работы»)
+	// when structured data carried no hours. Many RU SMB sites render hours only
+	// as visible text, never as openingHoursSpecification — this surfaces them.
+	// Fill-if-nil: a structured Hours (Layer 1) always wins.
+	if facts.Hours == nil {
+		if h := ExtractVisibleHours(html); h != "" {
+			facts.Hours = &h
+		}
+	}
 
 	return facts
 }
@@ -146,6 +169,39 @@ func applyContactOverride(html, city string, facts *Facts) {
 	}
 }
 
+// applyAddressElement fills Facts.Address from the first valid <address> HTML
+// element when the field is still nil. Fill-if-nil — a structured or labeled
+// address (Layer 1/2) is more precise and always wins.
+func applyAddressElement(html string, facts *Facts) {
+	if facts.Address != nil {
+		return
+	}
+	doc, err := documentFromHTML(html)
+	if err != nil || doc == nil {
+		return
+	}
+	if a := firstAddressElement(doc); a != nil {
+		facts.Address = a
+	}
+}
+
+// applyEmail fills Facts.Email from the first mailto: link on the page when the
+// field is still nil. Email is not subject to call-tracking/DNI rotation, so no
+// poison gate is needed — the site's own mailto: is authoritative. A still-nil
+// Email after this is simply "no email on this page".
+func applyEmail(html string, facts *Facts) {
+	if facts.Email != nil {
+		return
+	}
+	doc, err := documentFromHTML(html)
+	if err != nil || doc == nil {
+		return
+	}
+	if e := firstMailto(doc); e != nil {
+		facts.Email = e
+	}
+}
+
 func applyPlaceFacts(data *structured.Data, facts *Facts) {
 	place := data.FirstPlace()
 	if place == nil {
@@ -188,6 +244,7 @@ func applyOrgFacts(data *structured.Data, facts *Facts) {
 	setIfNil(&facts.Website, org.URL)
 	setIfValid(&facts.Phone, org.Phone, ValidatePhone)
 	setIfValid(&facts.Address, org.Address, ValidateAddress)
+	setIfNil(&facts.Hours, org.Hours)
 }
 
 func applyRegexFallback(html string, facts *Facts) {
