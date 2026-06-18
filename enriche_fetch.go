@@ -106,11 +106,18 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 	// merge input when no render happens, so a render is the only added cost.
 	rawFacts := extract.ExtractFactsForCity(fr.HTML, item.URL, item.City)
 	siteFacts := rawFacts
+	// discoveryHTML is the homepage HTML used to discover the contacts subpage:
+	// the rendered DOM when a homepage render happened (some homepages are JS
+	// shells whose nav links only exist post-render), else the raw HTML.
+	discoveryHTML := fr.HTML
 	thinContent := len([]rune(result.Content)) < minExtractChars
 	if e.browserFetch != nil && (thinContent || !hasContactFacts(rawFacts)) {
 		reason := renderReason(thinContent)
-		if rendered, err := e.browserFetch(ctx, item.URL); err == nil && rendered != "" {
+		rendered, err := e.browserFetch(ctx, item.URL)
+		switch {
+		case err == nil && len(rendered) >= minRenderShellBytes:
 			e.metrics.browserRender(reason)
+			discoveryHTML = rendered
 			// Content path: adopt rendered text only if it is longer.
 			e.browserFallback(rendered, item.URL, result)
 			// Facts path: adopt the rendered DOM only when it yields STRICTLY
@@ -119,8 +126,25 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 			// let a render-only artifact override a raw contact fact).
 			renderedFacts := extract.ExtractFactsForCity(rendered, item.URL, item.City)
 			if contactFactCount(renderedFacts) > contactFactCount(rawFacts) {
+				// Poison-OR: a DNI verdict from the RAW HTML must survive even when
+				// the (clean) rendered DOM replaces the fact-set. A page whose raw
+				// markup carries a call-tracking widget is a DNI site regardless of
+				// what the post-render DOM looks like (the widget may rewrite/remove
+				// itself at runtime). Carrying the poison flag forward keeps the
+				// rotating-proxy phone refused at the resolver.
+				if rawFacts.PhonePoisoned && !renderedFacts.PhonePoisoned {
+					renderedFacts.PhonePoisoned = true
+					renderedFacts.Phone = nil
+				}
 				siteFacts = renderedFacts
 			}
+		default:
+			// Render failed or returned a bot-protection error shell (too short)
+			// — keep the raw extraction, never adopt the shell, and record the
+			// failure so the real go-wowa hit-rate is observable.
+			e.metrics.browserRenderError()
+			e.logger.DebugContext(ctx, "enriche: homepage render failed/shell",
+				"url", item.URL, "rendered_bytes", len(rendered), "err", err)
 		}
 	}
 
@@ -141,6 +165,14 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 		e.metrics.siteResolved()
 	}
 	r.mergeSite(siteFacts)
+
+	// Contacts-subpage discovery: the homepage often links a dedicated /contacts
+	// page that carries the canonical, richer contact set (email, hours, address)
+	// the homepage omits. Discover it from the homepage links, fetch+render it,
+	// and merge its facts at sourceOfficialSite AFTER this homepage merge so a
+	// contacts-page value wins on conflict. siteFacts is the homepage's resolved
+	// facts — the contacts page must beat it to be adopted.
+	e.resolveContactsPage(ctx, item, result, r, discoveryHTML, siteFacts)
 
 	// Source-provided coordinates are owned by seedSourceCoords (applied at the
 	// top of Enrich); the resolver's mergeSite never touches coords, so the
@@ -254,6 +286,12 @@ const (
 // metric. thin_content (no article text) is reported in preference to
 // absent_contacts when both hold, since thin content is the stronger signal
 // that the whole page is JS-gated.
+//
+// absent_contacts means ALL structured contact fields were absent from the raw
+// HTML — phone (and not PhonePoisoned), address, AND hours AND email were every
+// one nil (see hasContactFacts). It is NOT "some contact field missing": a
+// single raw contact fact suppresses the render, because the contacts are then
+// demonstrably not JS-gated.
 func renderReason(thinContent bool) string {
 	if thinContent {
 		return "thin_content"
@@ -277,6 +315,9 @@ func contactFactCount(f extract.Facts) int {
 		n++
 	}
 	if f.Hours != nil {
+		n++
+	}
+	if f.Email != nil {
 		n++
 	}
 	return n

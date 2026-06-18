@@ -51,6 +51,7 @@ type SeedFacts struct {
 	Phone     string
 	Website   string
 	Hours     string
+	Email     string
 	Price     string
 }
 
@@ -92,6 +93,7 @@ type Provenance struct {
 	Phone     FieldProvenance `json:"phone,omitempty"`
 	Website   FieldProvenance `json:"website,omitempty"`
 	Hours     FieldProvenance `json:"hours,omitempty"`
+	Email     FieldProvenance `json:"email,omitempty"`
 	Price     FieldProvenance `json:"price,omitempty"`
 }
 

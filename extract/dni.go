@@ -66,6 +66,26 @@ var dniVendorSignatures = []struct {
 	},
 }
 
+// HasDNIVendor reports whether the HTML ACTIVELY runs a known DNI/call-tracking
+// vendor, regardless of whether a phone candidate is present in the markup. It
+// is the contacts-page render guard's signal: a contacts page whose RAW markup
+// carries a DNI loader but whose phone is JS-injected (absent from the raw DOM,
+// so PhonePoisoned is NOT set — dniOmit needs a candidate) would otherwise let a
+// render surface and LAUNDER the rotating proxy. Detecting the vendor signature
+// in the raw HTML lets the caller carry a poison verdict forward even when the
+// raw page had no extractable phone yet. Pure DOM read, no network I/O.
+func HasDNIVendor(html string) bool {
+	if html == "" {
+		return false
+	}
+	doc, err := documentFromHTML(html)
+	if err != nil || doc == nil {
+		return false
+	}
+	_, dni := detectDNIVendor(doc)
+	return dni
+}
+
 // detectDNIVendor reports whether the page ACTIVELY runs a known DNI/call-
 // tracking vendor, and which one. A vendor is "active" when its loader URL
 // appears in a <script src> OR an init-shaped config token appears in inline

@@ -33,6 +33,27 @@ type Metrics struct {
 	// the full-JS render path actually fires in production (observability for
 	// the JS-injected-contacts class).
 	OnBrowserRender func(reason string)
+
+	// OnBrowserRenderError fires once per render attempt that FAILED — the
+	// headless browser returned an error or an empty/too-short error-shell body
+	// (the 160-486 byte bot-protection shells some SPAs serve). Distinct from
+	// OnBrowserRender, which fires only on a render that was triggered (whether
+	// or not it ultimately yielded more facts). This surfaces the real go-wowa
+	// hit-rate so a passthrough-to-raw degrade is observable, not just inferred
+	// (enrich_browser_render_error_total).
+	OnBrowserRenderError func()
+
+	// OnContactsPageDiscovered fires once per Enrich call where a distinct
+	// same-origin contacts page was discovered from the homepage links
+	// (enrich_contacts_page_discovered_total). Lets the consumer track how often
+	// the contacts-subpage discovery path engages.
+	OnContactsPageDiscovered func()
+
+	// OnContactsPageResolved fires once per Enrich call where the discovered
+	// contacts page yielded STRICTLY MORE contact facts than the homepage did,
+	// so its facts were adopted (enrich_contacts_page_resolved_total). The gap
+	// between discovered and resolved is the contacts-page payoff rate.
+	OnContactsPageResolved func()
 }
 
 func (m *Metrics) cacheHit() {
@@ -86,5 +107,23 @@ func (m *Metrics) conflict(field string) {
 func (m *Metrics) browserRender(reason string) {
 	if m != nil && m.OnBrowserRender != nil && reason != "" {
 		m.OnBrowserRender(reason)
+	}
+}
+
+func (m *Metrics) browserRenderError() {
+	if m != nil && m.OnBrowserRenderError != nil {
+		m.OnBrowserRenderError()
+	}
+}
+
+func (m *Metrics) contactsPageDiscovered() {
+	if m != nil && m.OnContactsPageDiscovered != nil {
+		m.OnContactsPageDiscovered()
+	}
+}
+
+func (m *Metrics) contactsPageResolved() {
+	if m != nil && m.OnContactsPageResolved != nil {
+		m.OnContactsPageResolved()
 	}
 }
