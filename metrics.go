@@ -54,6 +54,15 @@ type Metrics struct {
 	// so its facts were adopted (enrich_contacts_page_resolved_total). The gap
 	// between discovered and resolved is the contacts-page payoff rate.
 	OnContactsPageResolved func()
+
+	// OnLegalVsVenueAddress fires when the official site supplied a registered
+	// LEGAL address while a (differing) VENUE address already owned the Address
+	// slot — the split-identity-address signal. Before the legal/venue field split
+	// this case silently overwrote the geo-correct venue address with the legal
+	// office, pointing the card's map link at the wrong place. The counter
+	// (enrich_address_legal_vs_venue_total) gives that previously-silent class a
+	// signal so a wrong-map-link regression is observable, not just perceived.
+	OnLegalVsVenueAddress func()
 }
 
 func (m *Metrics) cacheHit() {
@@ -125,5 +134,11 @@ func (m *Metrics) contactsPageDiscovered() {
 func (m *Metrics) contactsPageResolved() {
 	if m != nil && m.OnContactsPageResolved != nil {
 		m.OnContactsPageResolved()
+	}
+}
+
+func (m *Metrics) legalVsVenueAddress() {
+	if m != nil && m.OnLegalVsVenueAddress != nil {
+		m.OnLegalVsVenueAddress()
 	}
 }

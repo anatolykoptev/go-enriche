@@ -3,6 +3,7 @@ package structured
 import (
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 
 	"github.com/astappiev/microdata"
@@ -136,12 +137,77 @@ func itemToEvent(item *microdata.Item) *Event {
 
 func itemToOrganization(item *microdata.Item) *Organization {
 	return &Organization{
-		Name:    propString(item, "name"),
-		URL:     propString(item, "url"),
-		Phone:   propString(item, "telephone"),
-		Address: extractAddress(item),
-		Hours:   extractHours(item),
+		Name:       propString(item, "name"),
+		URL:        propString(item, "url"),
+		Phone:      propString(item, "telephone"),
+		Address:    extractAddress(item),
+		Hours:      extractHours(item),
+		LegalName:  propString(item, "legalName"),
+		HasLegalID: itemHasLegalID(item),
 	}
+}
+
+// reLegalID matches a Russian legal-entity identifier (ИНН / ОГРН / ОГРНИП / КПП).
+// These name a registered legal entity, never a place to visit, so their presence
+// anywhere in an Organization item corroborates that the item's address is the
+// registered/legal seat. The tokens are bound with a Cyrillic-safe boundary
+// (start-of-string or a separator on each side) so an ordinary word merely
+// embedding the letters does not spuriously match — the same boundary discipline
+// extract.reLegalAddressMarker uses for company-form tokens.
+var reLegalID = regexp.MustCompile(
+	`(?i)(?:^|[\s,.;:«"(])(?:инн|огрнип|огрн|кпп)(?:[\s,.;:»")]|$)`,
+)
+
+// reLegalIDPropKey matches a schema.org property KEY that carries a legal-entity
+// identifier: the Russian forms above plus the schema.org analogues taxID / vatID.
+// A property key is an exact (case-insensitive) match — keys are machine tokens,
+// not free text, so no boundary is needed.
+var reLegalIDPropKey = regexp.MustCompile(`(?i)^(?:инн|огрнип|огрн|кпп|taxid|vatid)$`)
+
+// itemHasLegalID reports whether a Russian legal-entity identifier
+// (ИНН/ОГРН/ОГРНИП/КПП) or its schema.org analogue (taxID/vatID) appears anywhere
+// in the item — as a property key, a string property value, or inside any nested
+// item. It walks nested items recursively (e.g. a PostalAddress that prints an ИНН
+// in its streetAddress, or a contactPoint carrying the registration IDs). Used to
+// corroborate the legal-address PROVENANCE arm: a bare Organization block with no
+// such identifier and no separate Place block must keep its (venue) address in the
+// map slot rather than have it demoted to LegalAddress. See extract.applyOrgFacts.
+func itemHasLegalID(item *microdata.Item) bool {
+	if item == nil {
+		return false
+	}
+	for key, values := range item.Properties {
+		if reLegalIDPropKey.MatchString(strings.TrimSpace(key)) {
+			return true
+		}
+		if valuesHaveLegalID(values) {
+			return true
+		}
+	}
+	return false
+}
+
+// valuesHaveLegalID reports whether any value in a property's value list carries a
+// legal-entity ID — recursing into nested items and matching the ID token in string
+// values. Split out of itemHasLegalID to keep each function's nesting shallow.
+func valuesHaveLegalID(values microdata.ValueList) bool {
+	for _, v := range values {
+		switch val := v.(type) {
+		case *microdata.Item:
+			if itemHasLegalID(val) {
+				return true
+			}
+		case string:
+			if reLegalID.MatchString(val) {
+				return true
+			}
+		case fmt.Stringer:
+			if reLegalID.MatchString(val.String()) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // propString returns the first string value for any of the given keys.
