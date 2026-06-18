@@ -95,12 +95,31 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 	// Goquery Tier 2 fallback for thin content.
 	e.goqueryFallback(fr.HTML, result)
 
-	// Browser fallback for JS-heavy pages with thin content.
-	html := fr.HTML
-	if e.browserFetch != nil && len([]rune(result.Content)) < minExtractChars {
+	// Browser fallback (full-JS render) for the official site. Two triggers:
+	//   1. thin readability content (< minExtractChars) — the page is a JS
+	//      shell whose article text only exists post-render; the existing
+	//      content-quality path.
+	//   2. absent contact facts — the raw HTML carried NO phone/address/hours,
+	//      so a contacts/hours block injected by JS (SPA venue sites: Tilda,
+	//      Bitrix, React) is invisible to a raw fetch. Render to surface it.
+	// rawFacts is extracted ONCE from the raw HTML and reused below as the
+	// merge input when no render happens, so a render is the only added cost.
+	rawFacts := extract.ExtractFactsForCity(fr.HTML, item.URL, item.City)
+	siteFacts := rawFacts
+	thinContent := len([]rune(result.Content)) < minExtractChars
+	if e.browserFetch != nil && (thinContent || !hasContactFacts(rawFacts)) {
+		reason := renderReason(thinContent)
 		if rendered, err := e.browserFetch(ctx, item.URL); err == nil && rendered != "" {
-			if e.browserFallback(rendered, item.URL, result) {
-				html = rendered
+			e.metrics.browserRender(reason)
+			// Content path: adopt rendered text only if it is longer.
+			e.browserFallback(rendered, item.URL, result)
+			// Facts path: adopt the rendered DOM only when it yields STRICTLY
+			// MORE contact facts than the raw HTML did — a render that surfaces
+			// nothing new must not displace the raw extraction (and must never
+			// let a render-only artifact override a raw contact fact).
+			renderedFacts := extract.ExtractFactsForCity(rendered, item.URL, item.City)
+			if contactFactCount(renderedFacts) > contactFactCount(rawFacts) {
+				siteFacts = renderedFacts
 			}
 		}
 	}
@@ -112,13 +131,12 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 		}
 	}
 
-	// Extract structured facts from the official site, then MERGE them through
-	// the source-priority resolver at sourceOfficialSite — site values override
-	// any maps/search value on conflict, while maps fills only what the site
-	// left empty. This replaces the former wholesale `result.Facts = ...` assign
-	// that clobbered the maps merge (and, depending on order, could drop the
-	// site value entirely). The resolver, not assignment order, decides winners.
-	siteFacts := extract.ExtractFactsForCity(html, item.URL, item.City)
+	// MERGE the official-site facts (raw or rendered, decided above) through the
+	// source-priority resolver at sourceOfficialSite — site values override any
+	// maps/search value on conflict, while maps fills only what the site left
+	// empty. The resolver, not assignment order, decides winners. siteFacts was
+	// selected by the render block: == rawFacts unless a render surfaced
+	// strictly more contact facts.
 	if siteHasAnyFact(siteFacts) {
 		e.metrics.siteResolved()
 	}
@@ -231,6 +249,38 @@ const (
 	maxGoqueryRatio    = 3
 	markdownLinkMarker = "]("
 )
+
+// renderReason names why the headless render fired, for the OnBrowserRender
+// metric. thin_content (no article text) is reported in preference to
+// absent_contacts when both hold, since thin content is the stronger signal
+// that the whole page is JS-gated.
+func renderReason(thinContent bool) string {
+	if thinContent {
+		return "thin_content"
+	}
+	return "absent_contacts"
+}
+
+// contactFactCount counts how many of the three structured CONTACT fields
+// (phone, address, hours) the extraction produced. Used to decide whether a
+// rendered DOM is strictly richer than the raw HTML before adopting it as the
+// facts source — a render that surfaces nothing new must not displace the raw
+// extraction. PhonePoisoned counts as a present phone signal: the DNI verdict
+// is itself information the resolver must keep, so a render that only re-shows
+// the rotating proxy does not count as "more".
+func contactFactCount(f extract.Facts) int {
+	n := 0
+	if f.Phone != nil || f.PhonePoisoned {
+		n++
+	}
+	if f.Address != nil {
+		n++
+	}
+	if f.Hours != nil {
+		n++
+	}
+	return n
+}
 
 // needsGoqueryFallback checks if goquery extraction should be attempted.
 func needsGoqueryFallback(format extract.Format, content string, contentRunes int) bool {
