@@ -11,14 +11,26 @@ type Facts struct {
 	PlaceName *string
 	PlaceType *string
 	Address   *string
-	Phone     *string
-	Price     *string
-	Website   *string
-	Hours     *string
-	Email     *string
-	EventDate *string
-	Latitude  *float64
-	Longitude *float64
+	// LegalAddress holds a registered/legal-entity address (юридический адрес)
+	// extracted from the same page as a SEPARATE, additive sidecar — it is NEVER
+	// the venue's geo address. Many RU /contacts pages print BOTH the legal office
+	// (ИНН/ОГРН line, литера/помещение, postal index — the registered seat, often
+	// across the city or oblast from the venue) AND the venue's visiting address.
+	// Collapsing both into Address inverts precedence: a high-confidence
+	// official-site LEGAL address would overwrite the geo-correct (lower-confidence)
+	// maps VENUE address, and the card's address-string-driven map link would point
+	// at the office, not the venue. Keeping them distinct lets the resolver route
+	// the legal one here (rendered as «Реквизиты», never the map slot) and leave the
+	// venue slot to the maps/geo address. This is the split-identity-address fix.
+	LegalAddress *string
+	Phone        *string
+	Price        *string
+	Website      *string
+	Hours        *string
+	Email        *string
+	EventDate    *string
+	Latitude     *float64
+	Longitude    *float64
 
 	// PhonePoisoned is true when the official site carries a DNI/call-tracking
 	// vendor (Roistat/Calltouch/Comagic/Mango/Callibri/UIS) and has NO DNI-immune
@@ -173,16 +185,18 @@ func applyContactOverride(html, city string, facts *Facts) {
 // element when the field is still nil. Fill-if-nil — a structured or labeled
 // address (Layer 1/2) is more precise and always wins.
 func applyAddressElement(html string, facts *Facts) {
-	if facts.Address != nil {
+	// Route through setAddressFact so a bare <address> legal seat fills
+	// LegalAddress, not Address. Skip the parse only when BOTH slots are filled
+	// (the venue slot may still be empty while LegalAddress is set, and vice
+	// versa — a contacts page can carry both in separate <address> blocks).
+	if facts.Address != nil && facts.LegalAddress != nil {
 		return
 	}
 	doc, err := documentFromHTML(html)
 	if err != nil || doc == nil {
 		return
 	}
-	if a := firstAddressElement(doc); a != nil {
-		facts.Address = a
-	}
+	firstAddressElements(doc, facts)
 }
 
 // applyEmail fills Facts.Email from the first mailto: link on the page when the
@@ -209,7 +223,7 @@ func applyPlaceFacts(data *structured.Data, facts *Facts) {
 	}
 	setIfNil(&facts.PlaceName, place.Name)
 	setIfNil(&facts.PlaceType, place.Type)
-	setIfValid(&facts.Address, place.Address, ValidateAddress)
+	setAddressIfValid(facts, place.Address)
 	setIfValid(&facts.Phone, place.Phone, ValidatePhone)
 	setIfNil(&facts.Website, place.Website)
 	setIfNil(&facts.Hours, place.Hours)
@@ -232,7 +246,7 @@ func applyEventFacts(data *structured.Data, facts *Facts) {
 	setIfNil(&facts.PlaceName, event.Name)
 	setIfNil(&facts.EventDate, event.StartDate)
 	setIfValid(&facts.Price, event.Price, ValidatePrice)
-	setIfValid(&facts.Address, event.Location, ValidateAddress)
+	setAddressIfValid(facts, event.Location)
 }
 
 func applyOrgFacts(data *structured.Data, facts *Facts) {
@@ -243,15 +257,13 @@ func applyOrgFacts(data *structured.Data, facts *Facts) {
 	setIfNil(&facts.PlaceName, org.Name)
 	setIfNil(&facts.Website, org.URL)
 	setIfValid(&facts.Phone, org.Phone, ValidatePhone)
-	setIfValid(&facts.Address, org.Address, ValidateAddress)
+	setAddressIfValid(facts, org.Address)
 	setIfNil(&facts.Hours, org.Hours)
 }
 
 func applyRegexFallback(html string, facts *Facts) {
-	if facts.Address == nil {
-		if addr := regexAddress(html); addr != nil && ValidateAddress(*addr) {
-			facts.Address = addr
-		}
+	if addr := regexAddress(html); addr != nil && ValidateAddress(*addr) {
+		setAddressFact(facts, *addr)
 	}
 	if facts.Phone == nil {
 		if phone := regexPhone(html); phone != nil && ValidatePhone(*phone) {
@@ -272,10 +284,8 @@ func ExtractSnippetFacts(text string, facts *Facts) {
 	if text == "" || facts == nil {
 		return
 	}
-	if facts.Address == nil {
-		if addr := regexSubmatch(reSnippetAddress, text); addr != nil && ValidateAddress(*addr) {
-			facts.Address = addr
-		}
+	if addr := regexSubmatch(reSnippetAddress, text); addr != nil && ValidateAddress(*addr) {
+		setAddressFact(facts, *addr)
 	}
 	if facts.Phone == nil {
 		if phone := regexMatch(rePhone, text); phone != nil && ValidatePhone(*phone) {

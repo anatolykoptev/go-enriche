@@ -90,11 +90,17 @@ type FieldProvenance struct {
 type Provenance struct {
 	PlaceName FieldProvenance `json:"place_name,omitempty"`
 	Address   FieldProvenance `json:"address,omitempty"`
-	Phone     FieldProvenance `json:"phone,omitempty"`
-	Website   FieldProvenance `json:"website,omitempty"`
-	Hours     FieldProvenance `json:"hours,omitempty"`
-	Email     FieldProvenance `json:"email,omitempty"`
-	Price     FieldProvenance `json:"price,omitempty"`
+	// LegalAddress is the resolved provenance of a registered/legal-entity address
+	// (юридический адрес) extracted from the official site. It is an additive
+	// sidecar, separate from Address (the venue/geo slot that drives the card's map
+	// link). Present only when the site supplied a legal address; consumers render
+	// it as «Реквизиты», NEVER as the map slot.
+	LegalAddress FieldProvenance `json:"legal_address,omitempty"`
+	Phone        FieldProvenance `json:"phone,omitempty"`
+	Website      FieldProvenance `json:"website,omitempty"`
+	Hours        FieldProvenance `json:"hours,omitempty"`
+	Email        FieldProvenance `json:"email,omitempty"`
+	Price        FieldProvenance `json:"price,omitempty"`
 }
 
 // Facts is re-exported from extract package.

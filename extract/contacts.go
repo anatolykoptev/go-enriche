@@ -243,23 +243,21 @@ func microdataPhone(doc *goquery.Document) *string {
 	return found
 }
 
-// firstAddressElement returns the text of the first HTML <address> element
-// whose content passes ValidateAddress. The <address> element is an explicit
-// semantic signal of a venue's contact address — the regex address path needs
-// an «адрес:»/«address:» label prefix, which a bare <address> block lacks, so a
-// contacts page that renders its address only inside <address> would otherwise
-// be missed. ZERO network I/O. Returns nil when no valid <address> is present.
-func firstAddressElement(doc *goquery.Document) *string {
-	var found *string
+// firstAddressElements scans every <address> block and routes each valid one
+// through setAddressFact, so a contacts page that prints its venue address in
+// one <address> and its legal seat in another populates BOTH Facts.Address and
+// Facts.LegalAddress (each fill-if-nil). It stops once both slots are filled.
+// This is the multi-<address> analogue of firstAddressElement, which only ever
+// captured ONE address (the first valid one — frequently the legal seat that is
+// printed first on a /contacts page, which is exactly the split-identity bug).
+func firstAddressElements(doc *goquery.Document, facts *Facts) {
 	doc.Find("address").EachWithBreak(func(_ int, s *goquery.Selection) bool {
 		v := strings.TrimSpace(s.Text())
 		if ValidateAddress(v) {
-			found = &v
-			return false
+			setAddressFact(facts, v)
 		}
-		return true
+		return facts.Address == nil || facts.LegalAddress == nil
 	})
-	return found
 }
 
 // firstMailto returns the first mailto: address (sans ?subject= etc.).

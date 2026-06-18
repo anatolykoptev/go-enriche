@@ -104,13 +104,14 @@ type fieldProv struct {
 // factProvenance records, for one Enrich call, which source won each field and
 // at what confidence. Zero value = all sourceNone (every field absent).
 type factProvenance struct {
-	placeName fieldProv
-	address   fieldProv
-	phone     fieldProv
-	website   fieldProv
-	hours     fieldProv
-	email     fieldProv
-	price     fieldProv
+	placeName    fieldProv
+	address      fieldProv
+	legalAddress fieldProv
+	phone        fieldProv
+	website      fieldProv
+	hours        fieldProv
+	email        fieldProv
+	price        fieldProv
 }
 
 // resolver is the SINGLE authority that merges a value into Facts under
@@ -276,6 +277,21 @@ func (r *resolver) mergeOrg(od *maps.OrgData) {
 func (r *resolver) mergeSite(sf extract.Facts) {
 	r.set(&r.facts.PlaceName, &r.prov.placeName, derefStr(sf.PlaceName), sourceOfficialSite, "place_name")
 	r.setPreferLonger(&r.facts.Address, &r.prov.address, derefStr(sf.Address), sourceOfficialSite, "address")
+	// LegalAddress: a registered/legal-entity address extracted from the site is
+	// routed to its OWN slot — it must NEVER occupy the venue Address slot (whose
+	// authority the geo-correct maps/site venue address holds). When the site
+	// supplies a legal address while a VENUE address already owns the Address slot
+	// (typically the maps card's geo address), count an address_legal_vs_venue
+	// conflict — this is the exact wrong-map-link signal that previously went
+	// silent (the legal address would have overwritten the venue address). The
+	// legal address is surfaced via Provenance for rendering as «Реквизиты», never
+	// as the map slot.
+	if la := derefStr(sf.LegalAddress); la != "" {
+		if r.facts.Address != nil && r.prov.address.source > sourceNone && derefStr(r.facts.Address) != la {
+			r.m.legalVsVenueAddress()
+		}
+		r.set(&r.facts.LegalAddress, &r.prov.legalAddress, la, sourceOfficialSite, "legal_address")
+	}
 	// Phone: a DNI-poison verdict from the site (PhonePoisoned) is a first-class
 	// "refuse" that drops + locks the phone (outranking any maps/search value,
 	// never an operator seed). Otherwise merge the site phone normally. The two
@@ -359,13 +375,14 @@ func (r *resolver) snapshot() Provenance {
 		return FieldProvenance{Source: p.source.String(), Confidence: string(p.conf)}
 	}
 	return Provenance{
-		PlaceName: conv(r.prov.placeName, r.facts.PlaceName != nil),
-		Address:   conv(r.prov.address, r.facts.Address != nil),
-		Phone:     conv(r.prov.phone, r.facts.Phone != nil),
-		Website:   conv(r.prov.website, r.facts.Website != nil),
-		Hours:     conv(r.prov.hours, r.facts.Hours != nil),
-		Email:     conv(r.prov.email, r.facts.Email != nil),
-		Price:     conv(r.prov.price, r.facts.Price != nil),
+		PlaceName:    conv(r.prov.placeName, r.facts.PlaceName != nil),
+		Address:      conv(r.prov.address, r.facts.Address != nil),
+		LegalAddress: conv(r.prov.legalAddress, r.facts.LegalAddress != nil),
+		Phone:        conv(r.prov.phone, r.facts.Phone != nil),
+		Website:      conv(r.prov.website, r.facts.Website != nil),
+		Hours:        conv(r.prov.hours, r.facts.Hours != nil),
+		Email:        conv(r.prov.email, r.facts.Email != nil),
+		Price:        conv(r.prov.price, r.facts.Price != nil),
 	}
 }
 
