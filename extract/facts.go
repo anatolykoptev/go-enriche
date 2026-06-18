@@ -18,6 +18,16 @@ type Facts struct {
 	EventDate *string
 	Latitude  *float64
 	Longitude *float64
+
+	// PhonePoisoned is true when the official site carries a DNI/call-tracking
+	// vendor (Roistat/Calltouch/Comagic/Mango/Callibri/UIS) and has NO DNI-immune
+	// phone (a hard-coded social-link number): every tel:/microdata candidate is a
+	// rotating proxy, so Phone is deliberately omitted (set nil). This is DISTINCT
+	// from "the site had no phone at all" — both leave Phone nil, but only a poison
+	// omit must OUTRANK a lower-priority maps/search phone at the resolver. A bare
+	// nil Phone says nothing; PhonePoisoned says "refuse, and block lower fills".
+	// The whole anti-fab fix turns on keeping these two signals distinct.
+	PhonePoisoned bool
 }
 
 // ExtractFacts extracts structured facts from HTML using a cascade:
@@ -107,7 +117,11 @@ func applyContactOverride(html, city string, facts *Facts) {
 		// every injected tel:/microdata candidate is a rotating proxy. Omit the
 		// phone entirely — including any Layer-1/2 value, which the vendor can
 		// rewrite — so the agent shows «уточняйте» rather than a rotating number.
+		// Flag PhonePoisoned so the source-priority resolver treats this as a
+		// first-class "refuse" verdict that outranks a maps/search phone, not as a
+		// mere absence (which would let the already-merged maps proxy survive).
 		facts.Phone = nil
+		facts.PhonePoisoned = true
 		return
 	}
 	if !ok {

@@ -142,3 +142,52 @@ func TestApplyContactOverride_NonDNINoSocialKeepsTel(t *testing.T) {
 		t.Fatalf("non-DNI no social: want +7 (812) 615 70 00 kept, got %v", facts.Phone)
 	}
 }
+
+// TestDetectDNIVendor_MentionNotFlagged is the FIX-4 false-positive guard: a
+// page that merely MENTIONS a DNI vendor name in prose / inline body text (a
+// blog post about call-tracking, a "we don't use Roistat/Calltouch" disclaimer,
+// a code sample) is NOT actively running the vendor, so it must NOT be flagged
+// DNI. A false DNI verdict would needlessly omit a real venue phone. Only a
+// loader <script src> URL or an init-shaped config token counts as active.
+func TestDetectDNIVendor_MentionNotFlagged(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		html string
+	}{
+		{
+			name: "prose mention of roistat in article body",
+			html: `<html><body><article><p>Мы не используем сервисы коллтрекинга
+			вроде Roistat или Calltouch — наш телефон постоянный.</p></article>
+			<footer><a href="tel:+78126157000">+7 (812) 615 70 00</a></footer></body></html>`,
+		},
+		{
+			name: "vendor name inside an inline code sample, not init",
+			html: `<html><body><pre><code>// example: comagic integration is optional
+			var x = "callibri";</code></pre>
+			<footer><a href="tel:+78126157000">+7 (812) 615 70 00</a></footer></body></html>`,
+		},
+		{
+			name: "mango as a plain word in prose (e.g. a fruit / unrelated brand)",
+			html: `<html><body><p>В меню кафе есть смузи манго (mango).</p>
+			<footer><a href="tel:+78126157000">+7 (812) 615 70 00</a></footer></body></html>`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			doc, err := documentFromHTML(tc.html)
+			if err != nil {
+				t.Fatalf("doc: %v", err)
+			}
+			if vendor, dni := detectDNIVendor(doc); dni {
+				t.Errorf("mention-only page flagged DNI (vendor=%q) — must NOT trip; a real phone would be wrongly omitted", vendor)
+			}
+			// And the real phone survives end-to-end (no false omit).
+			facts := ExtractFactsForCity(tc.html, "https://venue.ru", "Санкт-Петербург")
+			if facts.Phone == nil || *facts.Phone != "+7 (812) 615 70 00" {
+				t.Errorf("mention-only page: real phone must be kept, got %v", facts.Phone)
+			}
+		})
+	}
+}
