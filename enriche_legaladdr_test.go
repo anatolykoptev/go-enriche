@@ -45,19 +45,31 @@ const homeLinksContactsNoAddr = `<!DOCTYPE html><html lang="ru"><head><title>И�
 </article></body></html>`
 
 // contactsPageLegalOnlyWithFields is the /contacts subpage that carries a legal
-// registered seat (В.О. линия, литера/помещение, ИНН) — but NO venue visiting
-// address — plus an email and hours. This is the live drive-igora shape: the
-// extractor picked the legal seat for the address slot while the venue's geo
-// address came from the maps card. Before the field split the legal seat
-// (official_site/high) overwrote the maps venue address (maps/low) and the card's
-// map link pointed at the city-center office instead of the venue.
+// registered seat (В.О. линия, литера/помещение) — but NO venue visiting
+// address — plus an email and hours. MIRRORS THE LIVE drive-igora.ru/contacts
+// DOM (ox-browser fast-fetch, 2026-06-18): the legal seat is the streetAddress of
+// a display:none schema.org/Organization footer block (caught as LEGAL by
+// PROVENANCE — it carries no ИНН in the address string itself), while the
+// ИНН/ООО print inside an hours block. The venue's geo address comes only from
+// the maps card here. Before the field split the legal seat (official_site/high)
+// overwrote the maps venue address (maps/low) and the card's map link pointed at
+// the city-center office instead of the venue.
 const contactsPageLegalOnlyWithFields = `<!DOCTYPE html><html lang="ru"><head><title>Контакты</title></head>
 <body><div class="contacts">
-<address>11-я В.О. линия, дом № 38, литера А, помещение 91, Санкт-Петербург, 199178</address>
+<dl><dt>Режим работы</dt><dd>ежедневно 10:00-21:00</dd></dl>
+<p>ООО «Игора Драйв», ИНН 7801321150</p>
 <a href="mailto:info@drive-igora.ru">info@drive-igora.ru</a>
-<div><span>Режим работы</span><span>ежедневно 10:00-21:00</span></div>
 </div>
-<p>ИНН 7801321150 ООО «Игора Драйв»</p></body></html>`
+<footer></footer>
+<div style="display:none" itemscope itemtype="http://schema.org/Organization">
+<meta itemprop="name" content="Игора"/>
+<span itemprop="email">info@drive-igora.ru</span>
+<div itemprop="address" itemscope itemtype="http://schema.org/PostalAddress">
+<span itemprop="streetAddress">11-я В.О. линия, дом № 38, литера А, помещение 91</span>
+<span itemprop="addressLocality">Санкт-Петербург</span>
+<span itemprop="addressCountry">Россия</span>
+<span itemprop="postalCode">199178</span>
+</div></div></body></html>`
 
 // TestEnrich_LegalAddressSplit_VenueMapsHoldsSlot is THE headline Phase-C test
 // (the Игора case): the /contacts page's LEGAL seat must route to LegalAddress
@@ -174,15 +186,25 @@ func TestEnrich_VenueOnlyContactsAddress_WinsVenueSlot(t *testing.T) {
 	}
 }
 
-// contactsPageLegalOnly is a /contacts page whose ONLY address is a legal seat —
-// no venue visiting address anywhere on the page.
+// contactsPageLegalOnly is a /contacts page whose ONLY address is a legal seat,
+// printed as the streetAddress of a schema.org/Organization block (live-DOM
+// shape) — no venue visiting address anywhere on the page. The seat is caught as
+// LEGAL by PROVENANCE (Organization itemtype), not by any литера-in-string.
 const contactsPageLegalOnly = `<!DOCTYPE html><html lang="ru"><head><title>Контакты</title></head>
 <body><div class="contacts">
-<address>ул. Профессора Попова, 37, литера Щ, помещение 14-Н, Санкт-Петербург</address>
+<dl><dt>Режим работы</dt><dd>Пн-Пт 09:00-18:00</dd></dl>
+<p>ООО «Студия», ИНН 7813045678</p>
 <a href="mailto:office@studio.ru">office@studio.ru</a>
-<div><span>Режим работы</span><span>Пн-Пт 09:00-18:00</span></div>
 </div>
-<p>ИНН 7813045678 ООО «Студия»</p></body></html>`
+<footer></footer>
+<div style="display:none" itemscope itemtype="http://schema.org/Organization">
+<meta itemprop="name" content="Студия"/>
+<span itemprop="email">office@studio.ru</span>
+<div itemprop="address" itemscope itemtype="http://schema.org/PostalAddress">
+<span itemprop="streetAddress">ул. Профессора Попова, 37, литера Щ, помещение 14-Н</span>
+<span itemprop="addressLocality">Санкт-Петербург</span>
+<span itemprop="addressCountry">Россия</span>
+</div></div></body></html>`
 
 // TestEnrich_LegalOnlyContacts_NoMapsAddress_OmitsMapSlot is the no-maps-address
 // case (f): when ONLY a legal address exists anywhere (no maps venue address, no

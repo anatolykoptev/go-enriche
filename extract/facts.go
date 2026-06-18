@@ -257,7 +257,12 @@ func applyOrgFacts(data *structured.Data, facts *Facts) {
 	setIfNil(&facts.PlaceName, org.Name)
 	setIfNil(&facts.Website, org.URL)
 	setIfValid(&facts.Phone, org.Phone, ValidatePhone)
-	setAddressIfValid(facts, org.Address)
+	// An Organization itemtype is the registered legal entity, so its address is
+	// the legal/registered seat and routes to LegalAddress by PROVENANCE — never
+	// the venue Address slot. This is what catches the drive-igora legal seat
+	// (the streetAddress of a schema.org/Organization block, carrying no
+	// ИНН/ОГРН in the string itself) without keying on литера-in-string.
+	setOrgAddressIfValid(facts, org.Address)
 	setIfNil(&facts.Hours, org.Hours)
 }
 

@@ -2,74 +2,112 @@ package extract
 
 import "regexp"
 
-// reLegalAddressMarker matches STRONG, unambiguous signals that an address string
-// is a registered LEGAL/entity address (юридический адрес) rather than the venue's
-// visiting (geo) address. Two signal families:
+// reLegalAddressMarker matches STRONG, explicit signals that an address STRING is
+// a registered LEGAL/entity address (юридический адрес) rather than the venue's
+// visiting (geo) address. Signal families, all unambiguous:
 //
-//   - explicit legal/entity-identity tokens: a «юридический адрес» label, an
-//     ИНН/ОГРН/ОГРНИП/КПП tax-ID, or an ООО/ОАО/ЗАО/АО/ПАО/ИП company-form token
-//     bundled into the address line (the registered-seat block on a /contacts
-//     page routinely prints these next to the address);
-//   - литера / лит. — a cadastral letter token that marks a registered building
-//     unit and essentially never appears on a venue's customer-facing visiting
-//     address. This is the drive-igora signature: «…дом № 38, литера А…».
+//   - an explicit legal-section label: «юридический адрес» / «реквизиты»;
+//   - a tax / registration ID printed in the address line: ИНН / ОГРН / ОГРНИП /
+//     КПП — these identify a legal entity, never a place to visit;
+//   - a company-form token bundled into the line: ООО / ОАО / ЗАО / ПАО / АО / ИП.
 //
-// reOrgNoise (extract/hours_visible.go) already detects the company-form / tax-ID
-// family for trimming hours noise; this pattern is the address-classification
-// analogue and additionally covers литера/лит./«юридическ».
+// These are the markers a /contacts requisites block prints next to the
+// registered seat (e.g. «ООО «Игора Драйв», ИНН 7801321150»). reOrgNoise
+// (extract/hours_visible.go) detects the same company-form / tax-ID family for
+// trimming hours noise; this pattern is the address-classification analogue.
 //
-// Three deliberate scoping decisions, all in the SAFE direction. A false-demote of
-// a real VENUE address out of the map slot is the worst outcome — it breaks a
-// correct map link — so the classifier errs toward "venue":
-//   - RE2 (Go's regexp) defines a word boundary only over ASCII word chars, so a
-//     boundary adjacent to a Cyrillic token never matches. The Cyrillic tokens are
-//     therefore matched as plain (case-insensitive) substrings; only the
-//     ASCII-letter forms (АО, ИП) carry a \b, where it actually binds. «лит.» is
-//     matched with its trailing period (not a \b, which would never bind before a
-//     Cyrillic letter), which keeps it from firing inside «Литейный» (no period).
-//   - помещение / пом. / оф. / офис are deliberately NOT signals: a real venue
-//     legitimately occupies an office suite («…корпус 2, офис 5»), so keying on
-//     them would false-demote a geo-correct venue address. The drive-igora legal
-//     seat already classifies via ИНН + литера, so dropping them costs no recall.
-//   - a bare 6-digit postal index is NOT a signal: many real venue addresses
-//     print an index, so keying on it would false-demote them.
+// DELIBERATELY NOT signals (each appears in REAL venue visiting addresses — keying
+// on them false-demotes a geo-correct venue out of the map slot, the worst
+// outcome, so the classifier errs toward "venue"):
 //
-// Conservative by design: a plain street venue address («Невский проспект, 28»,
-// even with an office suite or a postal index) matches NONE of these, so it is NOT
-// mis-classified as legal — the negative-control invariant that keeps a real venue
-// address in the venue slot, winning over maps.
+//   - литера / лит. — a cadastral letter token. «литера А» is ubiquitous in normal
+//     SPb visiting addresses (ул. Маршала Жукова, 28, литера А), and the substring
+//     «литер» even matches the STREET NAME «улица Литераторов». Matching it caused
+//     the false-demote regression. Игора's legal seat is caught instead by
+//     PROVENANCE (it is the streetAddress of a schema.org/Organization block — see
+//     applyOrgFacts), not by литера-in-string, so dropping it costs no recall.
+//   - помещение / пом. / оф. / офис — a real venue legitimately occupies an office
+//     suite («…корпус 2, офис 5»).
+//   - a bare postal index — many real venue addresses print one.
+//
+// Cyrillic-boundary note: RE2 (Go's regexp) defines \b only over ASCII word chars,
+// so an ASCII \b adjacent to a Cyrillic token NEVER matches — a prior `\bао\b` /
+// `\bип\b` was dead and never classified an ИП/АО legal-prefix address. The
+// company-form tokens are therefore bound with an explicit Cyrillic-safe boundary
+// (start-of-string or a separator on each side) so «ИП Иванов, ул. Садовая, 5»
+// and «…, ООО «Ромашка»» classify while «Литейный» / «Заозёрная» / ordinary words
+// embedding the token's letters do not spuriously match.
 var reLegalAddressMarker = regexp.MustCompile(
-	`(?i)(?:юридическ|инн|огрн|огрнип|кпп|ооо|оао|зао|пао|\bао\b|\bип\b|литер|лит\.)`,
+	`(?i)(?:` +
+		`юридическ|реквизит|инн|огрн|огрнип|кпп` + // labels + tax / registration IDs
+		`|(?:^|[\s,.;«])(?:ооо|оао|зао|пао|ао|ип)(?:[\s,.;»]|$)` + // company forms, Cyrillic-safe boundary
+		`)`,
 )
 
-// isLegalAddress reports whether addr looks like a registered LEGAL/entity
-// address (and therefore must NOT occupy the venue Address slot / the card's map
-// link). See reLegalAddressMarker for the signal set. Conservative by design: it
-// returns false for a plain venue address so the classifier never false-demotes
-// a geo-correct venue address (the negative control).
+// isLegalAddress reports whether an address STRING carries a strong explicit
+// legal/entity marker (юридический-адрес/реквизиты label, ИНН/ОГРН/ОГРНИП/КПП tax
+// ID, or an ООО/ОАО/ЗАО/ПАО/АО/ИП company form). See reLegalAddressMarker for the
+// exact signal set and what is deliberately excluded. This is the STRING-based arm
+// of classification, used for Place / <address> / regex-sourced candidates; an
+// Organization-sourced address is classified LEGAL by PROVENANCE regardless of its
+// string (see setOrgAddressFact). Conservative by design: returns false for a
+// plain venue address (incl. one with литера / помещение / a postal index) so the
+// classifier never false-demotes a geo-correct venue address (the negative control
+// the reviewer flagged).
 func isLegalAddress(addr string) bool {
 	return reLegalAddressMarker.MatchString(addr)
 }
 
-// setAddressFact routes a validated address candidate to the correct sidecar
-// slot: a legal/entity address fills LegalAddress, a venue address fills Address.
-// Each slot is fill-if-nil and independent, so a /contacts page that prints BOTH
-// a legal seat and a venue address populates BOTH fields (whichever the cascade
-// reaches first per slot). A legal candidate never lands in Address, so it can
-// never overwrite the geo-correct venue address downstream. The caller is
-// responsible for ValidateAddress gating (kept at the call sites so the existing
-// validation order is unchanged).
+// setAddressFact routes a validated address candidate to the correct sidecar slot
+// using STRING-based classification: an address carrying a strong legal marker
+// (isLegalAddress) fills LegalAddress, otherwise it fills the venue Address slot.
+// Used for candidates whose provenance does NOT itself imply legal vs venue —
+// schema.org/Place, a bare <address> element, and the regex fallbacks. (An
+// Organization-sourced address bypasses the string test and routes through
+// setOrgAddressFact, which is legal by provenance.)
+//
+// Each slot is fill-if-nil and independent, so a /contacts page that prints BOTH a
+// legal seat and a venue address populates BOTH fields. A legal candidate never
+// lands in Address, so it can never overwrite the geo-correct venue address
+// downstream. The caller is responsible for ValidateAddress gating (kept at the
+// call sites so the existing validation order is unchanged).
 func setAddressFact(facts *Facts, candidate string) {
 	if candidate == "" {
 		return
 	}
 	if isLegalAddress(candidate) {
-		if facts.LegalAddress == nil {
-			c := candidate
-			facts.LegalAddress = &c
-		}
+		fillLegalAddress(facts, candidate)
 		return
 	}
+	fillVenueAddress(facts, candidate)
+}
+
+// setOrgAddressFact routes a schema.org/Organization-sourced address. The
+// Organization itemtype is the registered legal entity (schema.org semantics:
+// Organization = the legal body; Place / LocalBusiness = the place to visit), so
+// its address is the registered/legal seat and ALWAYS fills LegalAddress, NEVER
+// the venue Address slot — regardless of the string. This is the PROVENANCE arm of
+// classification: it catches Игора's legal seat («…дом № 38, литера А, помещение
+// 91…»), which carries no ИНН/ОГРН in the address string itself and so is
+// invisible to the string-based isLegalAddress, yet is unambiguously the legal
+// address because it is the Organization block's streetAddress.
+func setOrgAddressFact(facts *Facts, candidate string) {
+	if candidate == "" {
+		return
+	}
+	fillLegalAddress(facts, candidate)
+}
+
+// fillLegalAddress fills the LegalAddress slot fill-if-nil.
+func fillLegalAddress(facts *Facts, candidate string) {
+	if facts.LegalAddress == nil {
+		c := candidate
+		facts.LegalAddress = &c
+	}
+}
+
+// fillVenueAddress fills the venue Address slot fill-if-nil.
+func fillVenueAddress(facts *Facts, candidate string) {
 	if facts.Address == nil {
 		c := candidate
 		facts.Address = &c
@@ -77,12 +115,22 @@ func setAddressFact(facts *Facts, candidate string) {
 }
 
 // setAddressIfValid validates an *string address candidate (skipping nil/invalid)
-// and routes it through setAddressFact. It mirrors the old setIfValid(...,
-// ValidateAddress) call shape used by the structured-data apply paths, but splits
-// the result across the venue / legal slots instead of always filling Address.
+// and routes it through setAddressFact (string-based classification). It mirrors
+// the old setIfValid(..., ValidateAddress) call shape used by the schema.org/Place
+// and Event apply paths, but splits the result across the venue / legal slots.
 func setAddressIfValid(facts *Facts, src *string) {
 	if src == nil || !ValidateAddress(*src) {
 		return
 	}
 	setAddressFact(facts, *src)
+}
+
+// setOrgAddressIfValid validates an *string Organization address candidate and
+// routes it through setOrgAddressFact (provenance-based: always legal). Used by
+// applyOrgFacts so a schema.org/Organization seat never occupies the venue slot.
+func setOrgAddressIfValid(facts *Facts, src *string) {
+	if src == nil || !ValidateAddress(*src) {
+		return
+	}
+	setOrgAddressFact(facts, *src)
 }
