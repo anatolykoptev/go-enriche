@@ -36,11 +36,18 @@ var contactSlugs = map[string]contactSlugClass{
 	"contact-us":   slugContact,
 	"contactus":    slugContact,
 	"get-in-touch": slugContact,
+	"getintouch":   slugContact,
 	// Russian (Cyrillic + translit)
-	"контакты": slugContact,
-	"контакт":  slugContact,
-	"kontakty": slugContact,
-	"kontakt":  slugContact,
+	"контакты":   slugContact,
+	"контакт":    slugContact,
+	"свяжитесь":  slugContact, // "get in touch"
+	"связаться":  slugContact,
+	"kontakty":   slugContact,
+	"kontakt":    slugContact,
+	"kontakty-1": slugContact, // CMS dedup suffix some sites append
+	"svyazhites": slugContact, // свяжитесь (translit)
+	"svyaz":      slugContact, // связь / связаться (translit, short)
+	"svyazatsya": slugContact,
 	// German
 	"kontakte": slugContact,
 	// French
@@ -64,7 +71,8 @@ var contactSlugs = map[string]contactSlugClass{
 // case-insensitively against the trimmed anchor text. Kept short and
 // unambiguous — generic words ("info", "о") would over-match.
 var contactLinkText = []string{
-	"контакты", "контакт", "contacts", "contact us", "contact",
+	"контакты", "контакт", "свяжитесь", "связаться", "связаться с нами",
+	"contacts", "contact us", "contact", "get in touch",
 	"kontakt", "kontakte", "kontakty", "nous contacter", "contacto",
 	"contatti", "contato",
 }

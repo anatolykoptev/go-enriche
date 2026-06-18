@@ -8,11 +8,11 @@ import "testing"
 func TestDiscoverContactsPage_SlugFirst(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		home    string
-		base    string
-		want    string
-		wantOK  bool
+		name   string
+		home   string
+		base   string
+		want   string
+		wantOK bool
 	}{
 		{
 			name:   "RU contacts slug",
@@ -96,6 +96,34 @@ func TestDiscoverContactsPage_SlugFirst(t *testing.T) {
 			home:   `<a href="/page/5">Контакты</a>`,
 			base:   "https://venue.ru/",
 			want:   "https://venue.ru/page/5",
+			wantOK: true,
+		},
+		{
+			name:   "RU get-in-touch slug (свяжитесь)",
+			home:   `<a href="/свяжитесь/">Свяжитесь с нами</a>`,
+			base:   "https://venue.ru/",
+			want:   "https://venue.ru/%D1%81%D0%B2%D1%8F%D0%B6%D0%B8%D1%82%D0%B5%D1%81%D1%8C/",
+			wantOK: true,
+		},
+		{
+			name:   "RU translit svyaz slug",
+			home:   `<a href="/svyaz/">Связаться</a>`,
+			base:   "https://venue.ru/",
+			want:   "https://venue.ru/svyaz/",
+			wantOK: true,
+		},
+		{
+			name:   "EN getintouch slug (no hyphen plural gap)",
+			home:   `<a href="/getintouch">Get in touch</a>`,
+			base:   "https://venue.com/",
+			want:   "https://venue.com/getintouch",
+			wantOK: true,
+		},
+		{
+			name:   "RU svyaz beats about-family",
+			home:   `<a href="/o-nas/">О компании</a><a href="/svyazatsya/">Связаться</a>`,
+			base:   "https://venue.ru/",
+			want:   "https://venue.ru/svyazatsya/",
 			wantOK: true,
 		},
 	}

@@ -166,16 +166,66 @@ func (r *resolver) set(dst **string, owner *fieldProv, val string, src fieldSour
 	}
 }
 
+// setPreferLonger is set() with one refinement for fields where a more-complete
+// value is strictly better (address): on an EQUAL-source overwrite it keeps the
+// LONGER of the existing and incoming value. This stops a less-precise contacts-
+// page address from clobbering a more-precise homepage address at equal
+// official_site source ("Невский пр., 28, корп. 2, оф. 5" must survive a bare
+// "Невский пр., 28"). A strictly HIGHER source still wins outright (higher trust
+// beats length); a strictly lower source still only gap-fills. Used for address
+// only — phone/email/hours/place_name keep the plain set() last-writer-wins.
+func (r *resolver) setPreferLonger(dst **string, owner *fieldProv, val string, src fieldSource, field string) {
+	if val == "" {
+		return
+	}
+	if *dst != nil && **dst != val && src != owner.source && owner.source > sourceNone && src > sourceNone {
+		r.m.conflict(field)
+	}
+	// Equal source, both present: keep the longer (more-complete) value. Length is
+	// a cheap proxy for completeness for postal addresses (house/building/office
+	// suffixes); ValidateAddress already gated both candidates upstream.
+	if src == owner.source && *dst != nil && len([]rune(val)) <= len([]rune(**dst)) {
+		return
+	}
+	if src >= owner.source {
+		v := val
+		*dst = &v
+		owner.source = src
+		owner.conf = confidenceFor(src)
+		return
+	}
+	if *dst == nil && owner.source == sourceNone {
+		v := val
+		*dst = &v
+		owner.source = src
+		owner.conf = confidenceFor(src)
+	}
+}
+
 // dropPhone records a DNI-poison "refuse" verdict for the phone: the official
 // site carries a call-tracking vendor and no DNI-immune number, so every
 // candidate is a rotating proxy. It drops any already-merged lower-priority
 // phone (the maps/search card phone, which is itself often the same tracking
 // number) and LOCKS the field at sourcePoisonLock so no later maps/search fill
-// can resurrect it. An operator-verified seed is sacrosanct: a hand-verified
-// phone outranks the poison verdict and is never dropped.
+// can resurrect it.
+//
+// A poison verdict refuses only the rotating proxy it stands in for; it must
+// NOT erase a CLEAN phone that a higher-or-equal-trust source already resolved.
+// Two such sources are protected:
+//   - operator_verified — a hand-verified pin is sacrosanct on any site;
+//   - official_site — a clean tel:/JSON-LD phone the HOMEPAGE already resolved
+//     (e.g. a venue whose homepage carries a stable +7 (812) … but whose
+//     /contacts subpage runs a DNI widget). The contacts page's DNI suppresses
+//     only the contacts page's own (rotating) number, never the homepage's
+//     stable one — dropping it here was a silent recall regression.
+//
+// The drive-igora case (homepage IS the DNI site, no clean phone anywhere) is
+// unaffected: at the homepage merge the phone is still owned by maps/search/none
+// (< official_site), so the drop+lock fires as before.
 func (r *resolver) dropPhone() {
-	if r.prov.phone.source == sourceOperatorVerified {
-		// Operator pin wins even on a DNI site — leave it untouched.
+	if r.prov.phone.source >= sourceOfficialSite {
+		// An operator pin or an already-resolved clean official-site phone wins
+		// over a (later) DNI verdict — leave it untouched.
 		return
 	}
 	// Count a conflict when a real lower-priority phone is being refused, so the
@@ -225,7 +275,7 @@ func (r *resolver) mergeOrg(od *maps.OrgData) {
 // seedSourceCoords owns the coord authority.
 func (r *resolver) mergeSite(sf extract.Facts) {
 	r.set(&r.facts.PlaceName, &r.prov.placeName, derefStr(sf.PlaceName), sourceOfficialSite, "place_name")
-	r.set(&r.facts.Address, &r.prov.address, derefStr(sf.Address), sourceOfficialSite, "address")
+	r.setPreferLonger(&r.facts.Address, &r.prov.address, derefStr(sf.Address), sourceOfficialSite, "address")
 	// Phone: a DNI-poison verdict from the site (PhonePoisoned) is a first-class
 	// "refuse" that drops + locks the phone (outranking any maps/search value,
 	// never an operator seed). Otherwise merge the site phone normally. The two
