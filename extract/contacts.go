@@ -260,6 +260,31 @@ func firstAddressElements(doc *goquery.Document, facts *Facts) {
 	})
 }
 
+// firstVenueAddressElement returns the first valid <address>-element address that
+// is NOT a legal address by STRING classification — i.e. a venue visiting address.
+// Read-only: it mutates nothing. Used by the Organization-address PROVENANCE arm as
+// corroborant #4 — when the page carries a distinct venue <address> that differs
+// from the Org streetAddress, the Org address is the OTHER (legal) one. This mirrors
+// the venue side of firstAddressElements without committing to a slot, so the
+// provenance decision can read it before Layer 3.5 fills the venue slot.
+func firstVenueAddressElement(html string) *string {
+	doc, err := documentFromHTML(html)
+	if err != nil || doc == nil {
+		return nil
+	}
+	var found *string
+	doc.Find("address").EachWithBreak(func(_ int, s *goquery.Selection) bool {
+		v := strings.TrimSpace(s.Text())
+		if ValidateAddress(v) && !isLegalAddress(v) {
+			c := v
+			found = &c
+			return false // stop at the first venue address
+		}
+		return true
+	})
+	return found
+}
+
 // firstMailto returns the first mailto: address (sans ?subject= etc.).
 func firstMailto(doc *goquery.Document) *string {
 	var found *string

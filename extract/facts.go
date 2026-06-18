@@ -72,7 +72,7 @@ func ExtractFactsForCity(html, pageURL, city string) Facts {
 		applyPlaceFacts(data, &facts)
 		applyArticleFacts(data, &facts)
 		applyEventFacts(data, &facts)
-		applyOrgFacts(data, &facts)
+		applyOrgFacts(data, html, &facts)
 	}
 
 	// Layer 2: regex fallback — only fills nil fields.
@@ -249,7 +249,7 @@ func applyEventFacts(data *structured.Data, facts *Facts) {
 	setAddressIfValid(facts, event.Location)
 }
 
-func applyOrgFacts(data *structured.Data, facts *Facts) {
+func applyOrgFacts(data *structured.Data, html string, facts *Facts) {
 	org := data.FirstOrganization()
 	if org == nil {
 		return
@@ -257,13 +257,80 @@ func applyOrgFacts(data *structured.Data, facts *Facts) {
 	setIfNil(&facts.PlaceName, org.Name)
 	setIfNil(&facts.Website, org.URL)
 	setIfValid(&facts.Phone, org.Phone, ValidatePhone)
-	// An Organization itemtype is the registered legal entity, so its address is
-	// the legal/registered seat and routes to LegalAddress by PROVENANCE — never
-	// the venue Address slot. This is what catches the drive-igora legal seat
-	// (the streetAddress of a schema.org/Organization block, carrying no
-	// ИНН/ОГРН in the string itself) without keying on литера-in-string.
-	setOrgAddressIfValid(facts, org.Address)
+	// An Organization itemtype CAN be the registered legal entity, so its address
+	// CAN be the legal/registered seat — but only when a corroborating legal signal
+	// is present. A bare Organization block whose streetAddress is in fact the
+	// venue's visiting address (no separate Place block, no legal identifiers) must
+	// NOT have that address demoted to LegalAddress, or the venue loses its map slot
+	// (the same false-demote class as the литера-substring bug, via the provenance
+	// signal). Route to LegalAddress by PROVENANCE only when at least one corroborant
+	// holds; otherwise fall through to the STRING arm so a markerless venue address
+	// STAYS venue. This is a routing refinement — it adds no new writer of the
+	// Address slot (orgAddressIsLegal picks between the two existing routes).
+	if orgAddressIsLegal(org, html, facts) {
+		// Legal by corroborated provenance — e.g. drive-igora's seat (streetAddress
+		// of an Organization block whose item also carries ИНН), which carries no
+		// ИНН/ОГРН in the address string itself yet is unambiguously the legal seat.
+		setOrgAddressIfValid(facts, org.Address)
+	} else {
+		// No corroborant: the Org streetAddress is the only address signal and looks
+		// like a venue address — keep it in the venue slot via string classification.
+		setAddressIfValid(facts, org.Address)
+	}
 	setIfNil(&facts.Hours, org.Hours)
+}
+
+// orgAddressIsLegal decides whether a schema.org/Organization streetAddress should
+// be treated as a legal/registered seat (→ LegalAddress) rather than a venue
+// visiting address (→ Address). The Organization itemtype ALONE is not enough —
+// many RU SMB sites wrap their single visiting address in an Organization block.
+// At least ONE corroborating legal signal is required:
+//
+//  1. the address STRING itself carries a strong legal marker (isLegalAddress —
+//     ИНН/ОГРН/ОГРНИП/КПП/юридический/реквизиты/entity-form), OR
+//  2. an ИНН/ОГРН/ОГРНИП/КПП (or taxID/vatID) appears anywhere in the Org item
+//     (org.HasLegalID), OR
+//  3. the Org item carries a legalName property (org.LegalName), OR
+//  4. the page ALSO carries a distinct venue address that DIFFERS from the Org
+//     streetAddress — i.e. a Place/LocalBusiness block already filled the venue
+//     slot, so the Org address is the OTHER (legal) one.
+//
+// Absent ALL four, the lone Organization address is routed through the string arm
+// so a markerless venue address stays in the map slot. facts is read-only here.
+func orgAddressIsLegal(org *structured.Organization, html string, facts *Facts) bool {
+	if org.HasLegalID || org.LegalName != nil {
+		return true // corroborant #2 (in-item ИНН/ОГРН/taxID/vatID) / #3 (legalName)
+	}
+	if org.Address != nil && isLegalAddress(*org.Address) {
+		return true // corroborant #1 (legal marker in the address string itself)
+	}
+	// corroborant #2 (page scope): the live RU /contacts DOM prints the registration
+	// identifier (ООО «…», ИНН …) as page text adjacent to a display:none
+	// Organization block rather than inside the microdata item (the Игора shape), so
+	// the in-item scan above misses it. A legal-entity marker anywhere on the page
+	// the Org appears on still corroborates that the Org block describes a registered
+	// entity and its address is the legal seat.
+	if pageHasLegalEntityMarker(html) {
+		return true
+	}
+	// corroborant #4: the page carries a DISTINCT venue address that differs from
+	// the Org streetAddress — so the Org address is the OTHER (legal) one. The
+	// distinct venue can come from a Place/LocalBusiness block that already filled
+	// facts.Address (Layer 1, runs before this), OR from a visible <address> element
+	// (Layer 3.5, runs after this — so it is read here directly, read-only). This is
+	// the Игора-without-ИНН shape: a display:none Organization legal seat plus a
+	// visible <address> venue.
+	if org.Address != nil {
+		orgAddr := strings.TrimSpace(*org.Address)
+		if facts.Address != nil && strings.TrimSpace(*facts.Address) != orgAddr {
+			return true
+		}
+		if venue := firstVenueAddressElement(html); venue != nil &&
+			strings.TrimSpace(*venue) != orgAddr {
+			return true
+		}
+	}
+	return false
 }
 
 func applyRegexFallback(html string, facts *Facts) {

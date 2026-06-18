@@ -232,3 +232,62 @@ func TestExtractFacts_VenueOnlyAddressNotDemoted(t *testing.T) {
 		t.Fatalf("Address = %v, want the venue address in the venue slot", facts.Address)
 	}
 }
+
+// TestExtractFacts_BareOrgVenueAddress_NoCoSignal_StaysVenue is the MAKE-OR-BREAK
+// negative control the reviewer demanded (PROBE A): a bare schema.org/Organization
+// whose streetAddress is in fact the venue's visiting address — NO separate Place
+// block, NO ИНН/ОГРН/legalName anywhere, NO other address source. The Organization
+// itemtype ALONE must NOT demote that address to LegalAddress, or the venue loses
+// its map slot (the false-demote class, via the provenance signal instead of the
+// литера substring). Before the corroborant narrowing this was RED (the org-
+// provenance arm routed EVERY Organization streetAddress to LegalAddress
+// unconditionally); after it, the markerless lone Org address STAYS venue.
+func TestExtractFacts_BareOrgVenueAddress_NoCoSignal_StaysVenue(t *testing.T) {
+	t.Parallel()
+	html := `<!DOCTYPE html><html lang="ru"><body>
+<div itemscope itemtype="http://schema.org/Organization">
+  <meta itemprop="name" content="Кафе Уют" />
+  <div itemprop="address" itemscope itemtype="http://schema.org/PostalAddress">
+    <span itemprop="streetAddress">Невский проспект, 28</span>
+    <span itemprop="addressLocality">Санкт-Петербург</span>
+  </div>
+</div>
+</body></html>`
+	facts := ExtractFacts(html, "https://kafe-uyut.ru/")
+	if facts.Address == nil || !strings.Contains(*facts.Address, "Невский") {
+		t.Fatalf("Address = %v, want the venue address in the map slot (a markerless lone Organization address must NOT be demoted)", facts.Address)
+	}
+	if facts.LegalAddress != nil {
+		t.Errorf("LegalAddress = %q, want nil (no legal co-signal: no ИНН/ОГРН/legalName, no distinct venue address)", *facts.LegalAddress)
+	}
+}
+
+// TestExtractFacts_LocalBusinessVenueAddress_StaysVenue is the load-bearing
+// REGRESSION GUARD the reviewer flagged as untested: a schema.org/LocalBusiness
+// block routes via FirstPlace → the STRING arm, so its (markerless) address stays
+// in the venue slot. The parser type-set split (placeTypes routes LocalBusiness to
+// FirstPlace; only Organization/Corporation/GovernmentOrganization route to
+// FirstOrganization → the provenance arm) is what keeps a LocalBusiness address out
+// of the legal-by-provenance path. This guard locks that invariant in: a future
+// astappiev/microdata bump to a subtype-aware IsOfType, or a placeTypes / Org
+// type-set edit, must not silently collapse LocalBusiness into the org-provenance
+// arm and demote a venue address.
+func TestExtractFacts_LocalBusinessVenueAddress_StaysVenue(t *testing.T) {
+	t.Parallel()
+	html := `<!DOCTYPE html><html lang="ru"><body>
+<div itemscope itemtype="http://schema.org/LocalBusiness">
+  <meta itemprop="name" content="Ресторан Волна" />
+  <div itemprop="address" itemscope itemtype="http://schema.org/PostalAddress">
+    <span itemprop="streetAddress">Литейный проспект, 55, корпус 2</span>
+    <span itemprop="addressLocality">Санкт-Петербург</span>
+  </div>
+</div>
+</body></html>`
+	facts := ExtractFacts(html, "https://volna.ru/")
+	if facts.Address == nil || !strings.Contains(*facts.Address, "Литейный") {
+		t.Fatalf("Address = %v, want the venue address in the map slot (a LocalBusiness address must stay venue)", facts.Address)
+	}
+	if facts.LegalAddress != nil {
+		t.Errorf("LegalAddress = %q, want nil (LocalBusiness routes via the Place string arm, never the org-provenance arm)", *facts.LegalAddress)
+	}
+}
