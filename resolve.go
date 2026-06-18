@@ -331,6 +331,18 @@ func siteHasAnyFact(f extract.Facts) bool {
 		f.Hours != nil || f.EventDate != nil
 }
 
+// hasContactFacts reports whether the extracted facts carry at least one
+// structured CONTACT field — phone, address, or hours. Used to decide whether
+// a JS render is worth attempting on a text-rich page: if the raw HTML already
+// yielded a contact fact, the contacts are NOT JS-gated and a render adds no
+// value; if none are present, JS-injected contacts may be hiding and a render
+// can surface them. PhonePoisoned counts as a phone signal (DNI was already
+// detected from the raw HTML — a render would only show the rotating proxy, so
+// it must NOT re-trigger render for that field).
+func hasContactFacts(f extract.Facts) bool {
+	return f.Phone != nil || f.PhonePoisoned || f.Address != nil || f.Hours != nil
+}
+
 // siteRefutesClosed reports whether a reachable, active official-site fetch
 // should override a maps-only "closed" status (false-closed class, e.g.
 // Карт-Ленд flagged closed by a wrong Yandex card). A live site with its own

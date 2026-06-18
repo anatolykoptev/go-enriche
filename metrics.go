@@ -23,6 +23,16 @@ type Metrics struct {
 	// already owns a differing value). field is the fact name
 	// (enrich_conflict_total{field}).
 	OnConflict func(field string)
+
+	// OnBrowserRender fires once per Enrich call where the headless-browser
+	// render was triggered for the official site, with the reason it fired:
+	//   "thin_content"     — readability content was below minExtractChars
+	//   "absent_contacts"  — the raw HTML carried no phone/address/hours fact,
+	//                        so JS-injected contacts may be hiding behind render
+	// Lets the consumer track enrich_browser_render_total{reason} and confirm
+	// the full-JS render path actually fires in production (observability for
+	// the JS-injected-contacts class).
+	OnBrowserRender func(reason string)
 }
 
 func (m *Metrics) cacheHit() {
@@ -70,5 +80,11 @@ func (m *Metrics) siteResolved() {
 func (m *Metrics) conflict(field string) {
 	if m != nil && m.OnConflict != nil {
 		m.OnConflict(field)
+	}
+}
+
+func (m *Metrics) browserRender(reason string) {
+	if m != nil && m.OnBrowserRender != nil && reason != "" {
+		m.OnBrowserRender(reason)
 	}
 }
