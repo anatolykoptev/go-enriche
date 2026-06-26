@@ -8,8 +8,8 @@ github.com/RadhiFadlillah/whatlanggo v0.0.0-20240916001553-aac1f0f737fc h1:6aA31
 github.com/RadhiFadlillah/whatlanggo v0.0.0-20240916001553-aac1f0f737fc/go.mod h1:PgrPWaMBxL1lyq1k5DEMqC0Y67R3pG1vEsHzxFXeDxc=
 github.com/alicebob/miniredis/v2 v2.38.0 h1:nZAzCR+Lj+Vxk4ZXzm2NuKq2O33RXj1XxJ2e2uP9jiw=
 github.com/alicebob/miniredis/v2 v2.38.0/go.mod h1:TcL7YfarKPGDAthEtl5NBeHZfeUQj6OXMm/+iu5cLMM=
-github.com/anatolykoptev/go-engine v1.38.0 h1:DQx4Vqnf+vhzUH1TqkE+EtaCDJGpWJRusPytCC4j/Rs=
-github.com/anatolykoptev/go-engine v1.38.0/go.mod h1:eAy/ydcSakMFixdFHIV+/9q+U4n9V7ylzK0FugtlVyE=
+github.com/anatolykoptev/go-engine v1.42.0 h1:pRDCbdHWkUzZ3H3sFmwSrDta74r6XQmYRZDLsvfwDFw=
+github.com/anatolykoptev/go-engine v1.42.0/go.mod h1:U+TjTZ9jnA2YZLbwBHHDwHyK6EAyW7n1jBE5XsWpYVg=
 github.com/anatolykoptev/go-imagefy v0.1.1 h1:003FpJy8SXeTJNCfnvYuA+QOacP8bsxn2h5gTKquJE0=
 github.com/anatolykoptev/go-imagefy v0.1.1/go.mod h1:s+V/fuhF+bpbsGXLeYdWEtQR/rijhSqeFxXAQHWIo+M=
 github.com/anatolykoptev/go-stealth v1.15.0 h1:xdTEijmCrhahwQJAXNyxHeLwWQQessOrNxEyyh4dA2U=
