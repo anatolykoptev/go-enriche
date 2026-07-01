@@ -202,3 +202,126 @@ func TestFetcher_AllowsUnguardedClientOverride(t *testing.T) {
 		t.Errorf("expected active with an explicit unguarded client, got %s", result.Status)
 	}
 }
+
+// fakeRoundTripper is a minimal http.RoundTripper double used to prove
+// GuardClient's wrapping behavior without depending on real network I/O or a
+// *http.Transport — it stands in for an opaque stealth-style client whose
+// Transport does its own dial via a bespoke backend (e.g. go-stealth's
+// BrowserClient, which implements RoundTrip directly and exposes no
+// DialContext/net.Dialer hook at all).
+type fakeRoundTripper struct {
+	calls int
+}
+
+func (f *fakeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	f.calls++
+	return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Request: req}, nil
+}
+
+// TestGuardClient_NilTransport_Guards covers GuardClient's first branch: a
+// client with no Transport set (defaults to http.DefaultTransport at request
+// time) gets a fresh guardedTransport — the same strong, connect-time tier
+// as NewFetcher's own default.
+func TestGuardClient_NilTransport_Guards(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := GuardClient(&http.Client{Timeout: 2 * time.Second})
+	resp, err := c.Get(srv.URL) //nolint:noctx // test: fixed local httptest server
+	if resp != nil {
+		resp.Body.Close() //nolint:errcheck
+	}
+	if err == nil {
+		t.Fatal("expected GuardClient(nil-Transport client) to refuse a loopback target")
+	}
+	if !errors.Is(err, ErrSSRFBlocked) {
+		t.Errorf("expected error to wrap ErrSSRFBlocked, got: %v", err)
+	}
+}
+
+// TestGuardClient_HTTPTransport_PreservesConfigAndGuards covers GuardClient's
+// second branch: a *http.Transport is CLONED (not replaced) with only
+// DialContext wrapped, so unrelated config (stand-in here for
+// TLSClientConfig/ClientHelloID-style fingerprint settings) survives
+// untouched — this is the "WITHOUT disturbing its TLS/JA3/fingerprint-
+// evasion config" requirement for the WithStealth composition.
+func TestGuardClient_HTTPTransport_PreservesConfigAndGuards(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	const marker = 7 // distinctive, non-default value standing in for stealth-specific config
+	base := &http.Transport{MaxIdleConnsPerHost: marker}
+	c := GuardClient(&http.Client{Timeout: 2 * time.Second, Transport: base})
+
+	guarded, ok := c.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("expected *http.Transport after guarding a *http.Transport client, got %T", c.Transport)
+	}
+	if guarded.MaxIdleConnsPerHost != marker {
+		t.Errorf("GuardClient disturbed unrelated transport config: MaxIdleConnsPerHost = %d, want %d", guarded.MaxIdleConnsPerHost, marker)
+	}
+	if guarded == base {
+		t.Error("expected GuardClient to clone the transport, not mutate the caller's original")
+	}
+
+	resp, err := c.Get(srv.URL) //nolint:noctx // test: fixed local httptest server
+	if resp != nil {
+		resp.Body.Close() //nolint:errcheck
+	}
+	if err == nil {
+		t.Fatal("expected the guarded *http.Transport client to refuse a loopback target")
+	}
+	if !errors.Is(err, ErrSSRFBlocked) {
+		t.Errorf("expected error to wrap ErrSSRFBlocked, got: %v", err)
+	}
+}
+
+// TestGuardClient_CustomRoundTripper_BlocksBeforeDelegating covers
+// GuardClient's third branch — an opaque http.RoundTripper (the go-stealth
+// shape, see fakeRoundTripper) — proving the wrapped RoundTripper is NEVER
+// invoked for a blocked target: the check runs before delegating, not just
+// alongside it.
+func TestGuardClient_CustomRoundTripper_BlocksBeforeDelegating(t *testing.T) {
+	t.Parallel()
+	frt := &fakeRoundTripper{}
+	c := GuardClient(&http.Client{Transport: frt})
+
+	resp, err := c.Get("http://127.0.0.1:1/internal") //nolint:noctx // test: literal loopback target, never dialed
+	if resp != nil {
+		resp.Body.Close() //nolint:errcheck
+	}
+	if err == nil {
+		t.Fatal("expected the guarded custom RoundTripper to refuse a loopback target")
+	}
+	if !errors.Is(err, ErrSSRFBlocked) {
+		t.Errorf("expected error to wrap ErrSSRFBlocked, got: %v", err)
+	}
+	if frt.calls != 0 {
+		t.Errorf("expected the wrapped RoundTripper to NEVER be called for a blocked target, got %d calls", frt.calls)
+	}
+}
+
+// TestGuardClient_CustomRoundTripper_AllowsAndDelegates proves the allow path
+// still works: a public-looking target passes the check and reaches the
+// wrapped RoundTripper exactly once (no real network I/O — the literal IP
+// avoids a DNS lookup, and fakeRoundTripper never dials anything).
+func TestGuardClient_CustomRoundTripper_AllowsAndDelegates(t *testing.T) {
+	t.Parallel()
+	frt := &fakeRoundTripper{}
+	c := GuardClient(&http.Client{Transport: frt})
+
+	resp, err := c.Get("http://8.8.8.8/") //nolint:noctx // test: literal public IP, delegates to the fake (no real network I/O)
+	if err != nil {
+		t.Fatalf("unexpected error for a public target: %v", err)
+	}
+	resp.Body.Close() //nolint:errcheck
+	if frt.calls != 1 {
+		t.Errorf("expected the wrapped RoundTripper to be called exactly once for an allowed target, got %d calls", frt.calls)
+	}
+}

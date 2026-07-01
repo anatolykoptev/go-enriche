@@ -22,9 +22,19 @@ func WithFetcher(f *fetch.Fetcher) Option {
 }
 
 // WithStealth creates a Fetcher using a stealth HTTP client.
+//
+// fetch.WithClient REPLACES the Fetcher's client wholesale, which would
+// otherwise silently bypass NewFetcher's default SSRF guard — a real escape
+// hatch, since a stealth client is this org's production HTTP pattern
+// (go-stealth/go-wowa) and the caller-supplied URL it fetches is exactly the
+// untrusted input the guard exists for. fetch.GuardClient composes the guard
+// into c's Transport instead (connect-time DialContext wrap for a plain
+// *http.Transport, or a request-level pre-check wrap for an opaque
+// RoundTripper such as go-stealth's fingerprinting client) without touching
+// c's TLS/JA3/proxy/middleware configuration.
 func WithStealth(c *http.Client) Option {
 	return func(e *Enricher) {
-		e.fetcher = fetch.NewFetcher(fetch.WithClient(c))
+		e.fetcher = fetch.NewFetcher(fetch.WithClient(fetch.GuardClient(c)))
 	}
 }
 

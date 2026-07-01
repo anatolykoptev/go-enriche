@@ -128,6 +128,7 @@ func (e *Enricher) fetchOneSource(ctx context.Context, srcURL, city string) sour
 			// in a different process, so fetch.Fetcher's dial-time guard cannot
 			// protect this hop; gate it explicitly (SSRF guard, see checkTarget).
 			if err := e.checkTarget(ctx, srcURL); err != nil {
+				e.metrics.targetBlocked("ox_browser_search_source")
 				e.logger.DebugContext(ctx, "enriche: ox-browser search-source target blocked", "url", srcURL, "err", err)
 				oxCh <- nil
 				return

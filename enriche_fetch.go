@@ -28,6 +28,7 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 			// fetch.Fetcher's dial-time guard cannot protect this hop — gate the
 			// target explicitly before dispatch (SSRF guard, see checkTarget).
 			if err := e.checkTarget(ctx, item.URL); err != nil {
+				e.metrics.targetBlocked("ox_browser_item")
 				e.logger.DebugContext(ctx, "enriche: ox-browser target blocked", "url", item.URL, "err", err)
 				oxCh <- nil
 				return
@@ -120,7 +121,22 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 	// shells whose nav links only exist post-render), else the raw HTML.
 	discoveryHTML := fr.HTML
 	thinContent := len([]rune(result.Content)) < minExtractChars
-	if e.browserFetch != nil && (thinContent || !hasContactFacts(rawFacts)) {
+	shouldRenderHomepage := e.browserFetch != nil && (thinContent || !hasContactFacts(rawFacts))
+	if shouldRenderHomepage {
+		// item.URL is caller-supplied (e.g. an advertiser website field) and
+		// browserFetch dispatches it to an out-of-process render service
+		// (go-wowa), so fetch.Fetcher's dial-time guard on the RAW fetch above
+		// does not carry over to this hop — gate the target explicitly (SSRF
+		// guard, see checkTarget) before handing it off. thinContent/absent-
+		// contacts is a common trigger for SPA/Tilda/Bitrix/React venue
+		// homepages, so this path is attacker-craftable, not a corner case.
+		if err := e.checkTarget(ctx, item.URL); err != nil {
+			e.metrics.targetBlocked("homepage_render")
+			e.logger.DebugContext(ctx, "enriche: homepage render target blocked", "url", item.URL, "err", err)
+			shouldRenderHomepage = false
+		}
+	}
+	if shouldRenderHomepage {
 		reason := renderReason(thinContent)
 		rendered, err := e.browserFetch(ctx, item.URL)
 		switch {

@@ -149,7 +149,7 @@ func (e *Enricher) fetchContactsHTML(ctx context.Context, contactsURL string, it
 	// refusal is NOT inherited here; gate contactsURL explicitly (SSRF guard,
 	// see checkTarget) before handing it off.
 	if err := e.checkTarget(ctx, contactsURL); err != nil {
-		e.metrics.browserRenderError()
+		e.metrics.targetBlocked("contacts_page_render")
 		e.logger.DebugContext(ctx, "enriche: contacts page render target blocked", "url", contactsURL, "err", err)
 		return rawHTML, rawPoisoned
 	}

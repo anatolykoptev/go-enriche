@@ -147,3 +147,64 @@ func hostOf(rawURL string) (string, error) {
 	}
 	return host, nil
 }
+
+// GuardClient returns a shallow copy of c with the SSRF guard composed into
+// its Transport, WITHOUT replacing or disturbing any of the Transport's
+// existing configuration (TLS ClientHelloID/JA3 fingerprint, proxy,
+// middleware, connection pooling, etc.) — safe to apply to a
+// stealth/fingerprint-evasion client (see WithStealth in the enriche
+// package), which is exactly what this exists for: WithClient (and
+// WithStealth, which is built on it) REPLACES f.client wholesale, bypassing
+// NewFetcher's default guardedTransport entirely.
+//
+// Two composition tiers, chosen by what c.Transport actually is:
+//
+//   - nil or *http.Transport: cloned (Clone() preserves TLSClientConfig,
+//     proxy, HTTP2 settings, etc.) with ONLY DialContext wrapped by
+//     GuardedDialContext — the STRONG, connect-time, DNS-rebind-proof tier,
+//     identical to NewFetcher's own default guard.
+//   - any other http.RoundTripper (e.g. a stealth client whose Transport
+//     performs its own dial via a bespoke TLS-fingerprinting backend, with
+//     no DialContext/net.Dialer hook exposed at all): wrapped with a
+//     RoundTripper that runs CheckSSRFSafe on the outbound request's URL
+//     before delegating — the same, necessarily WEAKER pre-resolve tier as
+//     CheckSSRFSafe/checkTarget (a DNS-rebind can still occur between this
+//     check and the delegate's own, separate resolution), but the best
+//     guarantee available without reaching into a dial mechanism this
+//     package does not own. This is still real protection: it refuses the
+//     request outright for a target that resolves blocked at request time.
+//
+// c == nil returns nil unchanged (nothing to guard).
+func GuardClient(c *http.Client) *http.Client {
+	if c == nil {
+		return nil
+	}
+	cc := *c
+	switch t := c.Transport.(type) {
+	case nil:
+		cc.Transport = guardedTransport()
+	case *http.Transport:
+		tc := t.Clone()
+		tc.DialContext = GuardedDialContext(&net.Dialer{Timeout: guardedDialTimeout, KeepAlive: guardedDialKeepAlive})
+		cc.Transport = tc
+	default:
+		cc.Transport = &guardedRoundTripper{next: t}
+	}
+	return &cc
+}
+
+// guardedRoundTripper wraps an arbitrary http.RoundTripper with a
+// pre-request SSRF check (see CheckSSRFSafe) on the outbound request's URL.
+// This composes with ANY RoundTripper implementation — it never touches the
+// wrapped one's internal dial mechanics, so a stealth/fingerprint-evasion
+// implementation is untouched on the allow path.
+type guardedRoundTripper struct {
+	next http.RoundTripper
+}
+
+func (g *guardedRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := CheckSSRFSafe(req.Context(), req.URL.String()); err != nil {
+		return nil, err
+	}
+	return g.next.RoundTrip(req)
+}
