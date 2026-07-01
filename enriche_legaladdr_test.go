@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anatolykoptev/go-enriche/fetch"
 	"github.com/anatolykoptev/go-enriche/maps"
 )
 
@@ -96,8 +95,8 @@ func TestEnrich_LegalAddressSplit_VenueMapsHoldsSlot(t *testing.T) {
 	defer srv.Close()
 
 	var legalVsVenue int
-	e := New(
-		WithFetcher(fetch.NewFetcher()),
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
 		WithMapsChecker(&mockMapsCheckerAddr{
 			name: "Игора Драйв",
 			addr: "Приозерское шоссе, 3, к. 1", // the maps VENUE (geo) address
@@ -165,8 +164,8 @@ func TestEnrich_VenueOnlyContactsAddress_WinsVenueSlot(t *testing.T) {
 	defer srv.Close()
 
 	var legalVsVenue int
-	e := New(
-		WithFetcher(fetch.NewFetcher()),
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
 		WithMapsChecker(&mockMapsCheckerAddr{
 			name: "Кафе", addr: "Невский проспект, 100", lat: 59.93, lon: 30.36,
 		}),
@@ -234,8 +233,8 @@ func TestEnrich_LegalOnlyContacts_NoMapsAddress_OmitsMapSlot(t *testing.T) {
 	defer srv.Close()
 
 	var legalVsVenue int
-	e := New(
-		WithFetcher(fetch.NewFetcher()),
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
 		// Maps returns NO address (only coords) — the no-maps-venue-address case.
 		WithMapsChecker(&mockMapsChecker{lat: 59.97, lon: 30.31}),
 		WithMetrics(&Metrics{OnLegalVsVenueAddress: func() { legalVsVenue++ }}),

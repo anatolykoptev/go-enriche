@@ -85,7 +85,7 @@ func TestEnrich_Orchestration_SiteBeatsMapsPhone(t *testing.T) {
 	}}
 	counts, metrics := newCountingMetrics()
 
-	e := New(WithFetcher(fetch.NewFetcher()), WithMapsChecker(checker), WithMetrics(metrics))
+	e := newTestEnricher(WithFetcher(testFetcher()), WithMapsChecker(checker), WithMetrics(metrics))
 	result, err := e.Enrich(context.Background(), Item{
 		Name: "Royal Wedding", URL: srv.URL, City: spbCity, Mode: ModePlaces,
 	})
@@ -131,7 +131,7 @@ func TestEnrich_Orchestration_IgoraNoRegression(t *testing.T) {
 	}}
 	counts, metrics := newCountingMetrics()
 
-	e := New(WithFetcher(fetch.NewFetcher()), WithMapsChecker(checker), WithMetrics(metrics))
+	e := newTestEnricher(WithFetcher(testFetcher()), WithMapsChecker(checker), WithMetrics(metrics))
 	result, err := e.Enrich(context.Background(), Item{
 		Name: "Игора Драйв", URL: srv.URL, City: spbCity, Mode: ModePlaces,
 	})
@@ -171,7 +171,7 @@ func TestEnrich_Orchestration_FalseClosed_SiteRefutes(t *testing.T) {
 		OrgData: &maps.OrgData{Name: "Карт-Ленд", Phone: "+7 (800) 000-00-00"},
 	}}
 
-	e := New(WithFetcher(fetch.NewFetcher()), WithMapsChecker(checker))
+	e := newTestEnricher(WithFetcher(testFetcher()), WithMapsChecker(checker))
 	result, err := e.Enrich(context.Background(), Item{
 		Name: "Карт-Ленд", URL: srv.URL, City: spbCity, Mode: ModePlaces,
 	})
@@ -205,7 +205,7 @@ func TestEnrich_Orchestration_ClosedNoSite_MapsStands(t *testing.T) {
 	// Search provider present but returning no fetchable sources.
 	sr := searchResult("закрытое кафе", nil)
 	prov := &mockProvider{result: &sr}
-	e := New(WithMapsChecker(checker), WithSearch(prov))
+	e := newTestEnricher(WithMapsChecker(checker), WithSearch(prov))
 	result, err := e.Enrich(context.Background(), Item{
 		Name: "Закрытое навсегда", City: spbCity, Mode: ModePlaces, // no URL
 	})
@@ -245,7 +245,7 @@ func TestEnrich_Orchestration_ClosedNoSite_SearchDoesNotResurrect(t *testing.T) 
 	sr := searchResult("кафе на невском отзывы", []string{thirdParty.URL})
 	prov := &mockProvider{result: &sr}
 
-	e := New(WithFetcher(fetch.NewFetcher()), WithMapsChecker(checker), WithSearch(prov))
+	e := newTestEnricher(WithFetcher(testFetcher()), WithMapsChecker(checker), WithSearch(prov))
 	result, err := e.Enrich(context.Background(), Item{
 		Name: "Кафе на Невском", City: spbCity, Mode: ModePlaces, // no URL
 	})
@@ -275,7 +275,7 @@ func TestEnrich_Orchestration_ClosedDeadSite_MapsStands(t *testing.T) {
 		Status: maps.PlaceTemporaryClosed,
 		MapURL: "https://2gis.ru/x",
 	}}
-	e := New(WithFetcher(fetch.NewFetcher()), WithMapsChecker(checker))
+	e := newTestEnricher(WithFetcher(testFetcher()), WithMapsChecker(checker))
 	result, err := e.Enrich(context.Background(), Item{
 		Name: "Временно закрыто", URL: deadURL, City: spbCity, Mode: ModePlaces,
 	})
@@ -310,7 +310,7 @@ func TestEnrich_Orchestration_MapsFillsGap(t *testing.T) {
 		OrgData: &maps.OrgData{Name: "Площадка", Address: mapsAddr, Phone: mapsPhone},
 	}}
 
-	e := New(WithFetcher(fetch.NewFetcher()), WithMapsChecker(checker))
+	e := newTestEnricher(WithFetcher(testFetcher()), WithMapsChecker(checker))
 	result, err := e.Enrich(context.Background(), Item{
 		Name: "Площадка", URL: srv.URL, City: spbCity, Mode: ModePlaces,
 	})

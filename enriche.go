@@ -40,6 +40,22 @@ type Enricher struct {
 	searchFetchLimit int
 	logger           *slog.Logger
 	metrics          *Metrics
+
+	// targetGuard is the SSRF safety check run before a fetched URL is handed
+	// to an external render/extraction delegate this package does not control
+	// the outbound dial for (oxBrowser, browserFetch) — see checkTarget and
+	// WithTargetGuard. Defaults to fetch.CheckSSRFSafe in New().
+	targetGuard func(ctx context.Context, rawURL string) error
+}
+
+// checkTarget runs the configured SSRF target guard. Fails CLOSED (denies)
+// if none is configured — New() always sets one, so this only guards against
+// a future zero-value Enricher construction bypassing New().
+func (e *Enricher) checkTarget(ctx context.Context, rawURL string) error {
+	if e.targetGuard == nil {
+		return fmt.Errorf("%w: no target guard configured", fetch.ErrSSRFBlocked)
+	}
+	return e.targetGuard(ctx, rawURL)
 }
 
 // discardHandler silently discards all log records.
@@ -58,6 +74,7 @@ func New(opts ...Option) *Enricher {
 		concurrency: defaultConcurrency,
 		cacheTTL:    defaultCacheTTL,
 		logger:      slog.New(discardHandler{}),
+		targetGuard: fetch.CheckSSRFSafe,
 	}
 	for _, o := range opts {
 		o(e)

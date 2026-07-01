@@ -26,11 +26,11 @@ func parseOrgPage(html []byte) *OrgData {
 
 	// Status (reuse existing pattern).
 	switch parseOrgStatus(html) {
-	case "permanent-closed":
+	case yandexStatusPermanentClosed:
 		od.Status = PlacePermanentClosed
-	case "temporary-closed":
+	case yandexStatusTemporaryClosed:
 		od.Status = PlaceTemporaryClosed
-	case "open":
+	case yandexStatusOpen:
 		od.Status = PlaceOpen
 	}
 

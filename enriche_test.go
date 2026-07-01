@@ -53,12 +53,42 @@ func newTestServer(html string, statusCode int) *httptest.Server {
 	}))
 }
 
+// testFetcher builds a fetch.Fetcher whose client skips the default SSRF
+// guard (fetch/ssrf.go), for tests that point item.URL at a local
+// httptest.Server (loopback) — a legitimate target in a test, but one the
+// guarded default correctly refuses. Uses the pre-existing WithClient escape
+// hatch, same as any other caller opting out of the default guard. Shared
+// across every *_test.go file in this package.
+func testFetcher() *fetch.Fetcher {
+	return fetch.NewFetcher(fetch.WithClient(&http.Client{Timeout: fetch.DefaultTimeout}))
+}
+
+// allowAllTargets is a permissive Enricher.targetGuard override (see
+// WithTargetGuard) for tests that drive the oxBrowser/browserFetch render
+// delegates against a local httptest.Server. The REAL default guard
+// (fetch.CheckSSRFSafe) would refuse a loopback target, same reasoning as
+// testFetcher — this is the render-delegate-gate analogue of that escape
+// hatch, not a production code path.
+func allowAllTargets(context.Context, string) error { return nil }
+
+// newTestEnricher builds an Enricher defaulted for tests that point item.URL
+// (or a discovered contacts/search-source URL) at a local httptest.Server:
+// the SSRF guard — both fetch.Fetcher default transport and the
+// Enricher-level targetGuard (see fetch/ssrf.go, options.go) — correctly
+// refuses a loopback target, so every such test needs an explicit opt-out.
+// Caller opts are applied AFTER these defaults, so a test can still override
+// either (e.g. to exercise the real guard, pass New() directly instead).
+func newTestEnricher(opts ...Option) *Enricher {
+	base := []Option{WithFetcher(testFetcher()), WithTargetGuard(allowAllTargets)}
+	return New(append(base, opts...)...)
+}
+
 func TestEnrich_FetchAndExtract(t *testing.T) {
 	t.Parallel()
 	srv := newTestServer(testHTML, http.StatusOK)
 	defer srv.Close()
 
-	e := New(WithFetcher(fetch.NewFetcher()))
+	e := newTestEnricher(WithFetcher(testFetcher()))
 	result, err := e.Enrich(context.Background(), Item{
 		Name: "Test",
 		URL:  srv.URL,
@@ -80,7 +110,7 @@ func TestEnrich_NotFound(t *testing.T) {
 	srv := newTestServer("", http.StatusNotFound)
 	defer srv.Close()
 
-	e := New()
+	e := newTestEnricher()
 	result, err := e.Enrich(context.Background(), Item{
 		Name: "Missing",
 		URL:  srv.URL,
@@ -105,7 +135,7 @@ func TestEnrich_WithSearch(t *testing.T) {
 		},
 	}
 
-	e := New(WithSearch(mock))
+	e := newTestEnricher(WithSearch(mock))
 	result, err := e.Enrich(context.Background(), Item{
 		Name: "Test Place",
 		City: "Moscow",
@@ -128,7 +158,7 @@ func TestEnrich_WithCache(t *testing.T) {
 	defer srv.Close()
 
 	mem := cache.NewMemory()
-	e := New(WithCache(mem), WithFetcher(fetch.NewFetcher()))
+	e := newTestEnricher(WithCache(mem), WithFetcher(testFetcher()))
 
 	item := Item{Name: "Cached", URL: srv.URL, Mode: ModeNews}
 
@@ -166,7 +196,7 @@ func TestEnrich_NoURL_SearchOnly(t *testing.T) {
 		},
 	}
 
-	e := New(WithSearch(mock))
+	e := newTestEnricher(WithSearch(mock))
 	result, err := e.Enrich(context.Background(), Item{
 		Name: "Search Only Item",
 		Mode: ModeNews,
@@ -189,7 +219,7 @@ func TestEnrich_NoURL_SearchOnly(t *testing.T) {
 func TestEnrich_NoURL_NoSearch(t *testing.T) {
 	t.Parallel()
 	// No search provider → no sources → status stays empty.
-	e := New()
+	e := newTestEnricher()
 	result, err := e.Enrich(context.Background(), Item{
 		Name: "Minimal NoURL",
 		Mode: ModeNews,
@@ -205,7 +235,7 @@ func TestEnrich_NoURL_NoSearch(t *testing.T) {
 func TestEnrich_GracefulDegradation(t *testing.T) {
 	t.Parallel()
 	// No cache, no search, no stealth — should work with defaults.
-	e := New()
+	e := newTestEnricher()
 	result, err := e.Enrich(context.Background(), Item{
 		Name: "Minimal",
 	})
@@ -222,7 +252,7 @@ func TestEnrichBatch(t *testing.T) {
 	srv := newTestServer(testHTML, http.StatusOK)
 	defer srv.Close()
 
-	e := New(WithConcurrency(2))
+	e := newTestEnricher(WithConcurrency(2))
 	items := []Item{
 		{Name: "Item1", URL: srv.URL},
 		{Name: "Item2", URL: srv.URL},
@@ -263,7 +293,7 @@ func TestEnrichBatch_Concurrency(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := New(WithConcurrency(2))
+	e := newTestEnricher(WithConcurrency(2))
 	items := make([]Item, 6)
 	for i := range items {
 		items[i] = Item{Name: "item", URL: srv.URL}
@@ -294,7 +324,7 @@ func TestEnrichBatch_ContextCancel(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	e := New(WithConcurrency(2))
+	e := newTestEnricher(WithConcurrency(2))
 	items := make([]Item, 4)
 	for i := range items {
 		items[i] = Item{Name: "cancel", URL: srv.URL}
@@ -329,7 +359,7 @@ func TestEnrich_RetryTransient(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := New()
+	e := newTestEnricher()
 	result, err := e.Enrich(context.Background(), Item{Name: "Retry", URL: srv.URL})
 	if err != nil {
 		t.Fatalf("Enrich error: %v", err)
@@ -351,7 +381,7 @@ func TestEnrich_NoRetryFor404(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := New()
+	e := newTestEnricher()
 	result, _ := e.Enrich(context.Background(), Item{Name: "NoRetry", URL: srv.URL})
 	if result.Status != fetch.StatusNotFound {
 		t.Errorf("expected StatusNotFound, got %q", result.Status)
@@ -368,7 +398,7 @@ func TestEnrich_OGImage(t *testing.T) {
 	srv := newTestServer(html, http.StatusOK)
 	defer srv.Close()
 
-	e := New()
+	e := newTestEnricher()
 	result, err := e.Enrich(context.Background(), Item{Name: "OG", URL: srv.URL})
 	if err != nil {
 		t.Fatalf("Enrich error: %v", err)
@@ -385,7 +415,7 @@ func TestEnrich_SearchError(t *testing.T) {
 	t.Parallel()
 	mock := &mockProvider{err: context.DeadlineExceeded}
 
-	e := New(WithSearch(mock))
+	e := newTestEnricher(WithSearch(mock))
 	result, err := e.Enrich(context.Background(), Item{Name: "Failing Search"})
 	if err != nil {
 		t.Fatalf("Enrich should not error on search failure, got: %v", err)
@@ -403,7 +433,7 @@ func TestEnrich_WithSearchProvider(t *testing.T) {
 			Sources: []string{"https://src.com/1"},
 		},
 	}
-	e := New(WithSearch(provider))
+	e := newTestEnricher(WithSearch(provider))
 	result, err := e.Enrich(context.Background(), Item{
 		Name: "Test Search",
 		Mode: ModeNews,
@@ -421,7 +451,7 @@ func TestEnrich_MaxContentLen(t *testing.T) {
 	srv := newTestServer(testHTML, http.StatusOK)
 	defer srv.Close()
 
-	e := New(WithMaxContentLen(50))
+	e := newTestEnricher(WithMaxContentLen(50))
 	result, err := e.Enrich(context.Background(), Item{Name: "Truncated", URL: srv.URL})
 	if err != nil {
 		t.Fatalf("Enrich error: %v", err)
@@ -440,7 +470,7 @@ func TestEnrich_WithLogger(t *testing.T) {
 	srv := newTestServer(testHTML, http.StatusOK)
 	defer srv.Close()
 
-	e := New(WithLogger(logger))
+	e := newTestEnricher(WithLogger(logger))
 	_, err := e.Enrich(context.Background(), Item{Name: "Logged", URL: srv.URL})
 	if err != nil {
 		t.Fatalf("Enrich error: %v", err)
@@ -495,11 +525,11 @@ func (m *mockMapsChecker) Check(_ context.Context, _, _, _ string) (*maps.CheckR
 func TestEnrich_SourceCoords_WinsOverMapsChecker_NoURL(t *testing.T) {
 	t.Parallel()
 
-	srcLat, srcLon := 59.9390, 30.3158 // source-authoritative (e.g. KudaGo)
+	srcLat, srcLon := 59.9390, 30.3158   // source-authoritative (e.g. KudaGo)
 	mapsLat, mapsLon := 55.7558, 37.6176 // maps-checker returns Moscow coords
 
 	checker := &mockMapsChecker{lat: mapsLat, lon: mapsLon}
-	e := New(WithMapsChecker(checker))
+	e := newTestEnricher(WithMapsChecker(checker))
 
 	result, err := e.Enrich(context.Background(), Item{
 		Name:      "Кафе Singer",
@@ -533,14 +563,14 @@ func TestEnrich_SourceCoords_WinsOverMapsChecker_NoURL(t *testing.T) {
 func TestEnrich_SourceCoords_WinsOverMapsChecker_WithURL(t *testing.T) {
 	t.Parallel()
 
-	srcLat, srcLon := 59.9390, 30.3158 // source-authoritative
+	srcLat, srcLon := 59.9390, 30.3158   // source-authoritative
 	mapsLat, mapsLon := 55.7558, 37.6176 // maps-checker would return these
 
 	srv := newTestServer(testHTML, http.StatusOK)
 	defer srv.Close()
 
 	checker := &mockMapsChecker{lat: mapsLat, lon: mapsLon}
-	e := New(WithMapsChecker(checker))
+	e := newTestEnricher(WithMapsChecker(checker))
 
 	result, err := e.Enrich(context.Background(), Item{
 		Name:      "Кафе Singer",
@@ -575,7 +605,7 @@ func TestEnrich_NoSourceCoords_MapsCheckerFills(t *testing.T) {
 
 	mapsLat, mapsLon := 55.7558, 37.6176
 	checker := &mockMapsChecker{lat: mapsLat, lon: mapsLon}
-	e := New(WithMapsChecker(checker))
+	e := newTestEnricher(WithMapsChecker(checker))
 
 	result, err := e.Enrich(context.Background(), Item{
 		Name: "Some Cafe",
@@ -602,7 +632,7 @@ func TestEnrich_SourceCoords_PairGuard(t *testing.T) {
 	srcLat := 59.9390
 	mapsLat, mapsLon := 55.7558, 37.6176
 	checker := &mockMapsChecker{lat: mapsLat, lon: mapsLon}
-	e := New(WithMapsChecker(checker))
+	e := newTestEnricher(WithMapsChecker(checker))
 
 	result, err := e.Enrich(context.Background(), Item{
 		Name:      "Half Coord Place",
@@ -639,7 +669,7 @@ func TestEnrich_SourceCoords_PlacesNoURL_MapsError(t *testing.T) {
 
 	srcLat, srcLon := 59.9390, 30.3158
 	checker := &mockMapsCheckerError{}
-	e := New(WithMapsChecker(checker))
+	e := newTestEnricher(WithMapsChecker(checker))
 
 	result, err := e.Enrich(context.Background(), Item{
 		Name:      "Кафе на Невском",
@@ -675,7 +705,7 @@ func TestEnrich_SourceCoords_EventsNoURL(t *testing.T) {
 	srcLat, srcLon := 59.9390, 30.3158
 	// maps checker is wired but must not affect events — add it to prove isolation.
 	checker := &mockMapsChecker{lat: 55.7558, lon: 37.6176}
-	e := New(WithMapsChecker(checker))
+	e := newTestEnricher(WithMapsChecker(checker))
 
 	result, err := e.Enrich(context.Background(), Item{
 		Name:      "Фестиваль на Дворцовой",
@@ -719,7 +749,7 @@ func (s stubMapsChecker) Check(_ context.Context, _, _, _ string) (*maps.CheckRe
 // instead of falling through to fetchAndExtract (which would set StatusActive).
 func TestCheckMapsStatus_TemporaryClosed_MapsToTemporaryStatus(t *testing.T) {
 	t.Parallel()
-	e := New(WithMapsChecker(stubMapsChecker{
+	e := newTestEnricher(WithMapsChecker(stubMapsChecker{
 		res: &maps.CheckResult{Status: maps.PlaceTemporaryClosed, MapURL: "https://2gis.ru/x"},
 	}))
 	result, err := e.Enrich(context.Background(), Item{Name: "Закрытое кафе", Mode: ModePlaces, City: "СПб"})
@@ -735,7 +765,7 @@ func TestCheckMapsStatus_TemporaryClosed_MapsToTemporaryStatus(t *testing.T) {
 // PlacePermanentClosed → StatusClosed mapping is not broken by the F14 change.
 func TestCheckMapsStatus_PermanentClosed_StillMapsToClosed(t *testing.T) {
 	t.Parallel()
-	e := New(WithMapsChecker(stubMapsChecker{res: &maps.CheckResult{Status: maps.PlacePermanentClosed}}))
+	e := newTestEnricher(WithMapsChecker(stubMapsChecker{res: &maps.CheckResult{Status: maps.PlacePermanentClosed}}))
 	result, err := e.Enrich(context.Background(), Item{Name: "X", Mode: ModePlaces})
 	if err != nil {
 		t.Fatalf("Enrich error: %v", err)
@@ -754,7 +784,7 @@ func TestEnrich_SourceCoords_PairGuard_LonOnly(t *testing.T) {
 	srcLon := 30.3158
 	mapsLat, mapsLon := 55.7558, 37.6176
 	checker := &mockMapsChecker{lat: mapsLat, lon: mapsLon}
-	e := New(WithMapsChecker(checker))
+	e := newTestEnricher(WithMapsChecker(checker))
 
 	result, err := e.Enrich(context.Background(), Item{
 		Name:      "Half Coord Place Lon",

@@ -32,7 +32,7 @@ const (
 var contactSlugs = map[string]contactSlugClass{
 	// English
 	"contact":      slugContact,
-	"contacts":     slugContact,
+	regionContacts: slugContact, // "contacts" — reuse the constant defined in contacts.go
 	"contact-us":   slugContact,
 	"contactus":    slugContact,
 	"get-in-touch": slugContact,

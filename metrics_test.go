@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/anatolykoptev/go-enriche/cache"
-	"github.com/anatolykoptev/go-enriche/fetch"
 )
 
 func TestMetrics_CacheHitMiss(t *testing.T) {
@@ -22,7 +21,7 @@ func TestMetrics_CacheHitMiss(t *testing.T) {
 	}
 
 	mem := cache.NewMemory()
-	e := New(WithCache(mem), WithFetcher(fetch.NewFetcher()), WithMetrics(m))
+	e := newTestEnricher(WithCache(mem), WithFetcher(testFetcher()), WithMetrics(m))
 
 	item := Item{Name: "M", URL: srv.URL}
 	e.Enrich(context.Background(), item) //nolint:errcheck
@@ -46,7 +45,7 @@ func TestMetrics_FetchError(t *testing.T) {
 		OnFetchError: func() { errs.Add(1) },
 	}
 
-	e := New(WithMetrics(m))
+	e := newTestEnricher(WithMetrics(m))
 	e.Enrich(context.Background(), Item{Name: "Bad", URL: srv.URL}) //nolint:errcheck
 
 	if errs.Load() != 1 {
@@ -56,7 +55,7 @@ func TestMetrics_FetchError(t *testing.T) {
 
 func TestMetrics_NilSafe(t *testing.T) {
 	t.Parallel()
-	e := New(WithMetrics(nil))
+	e := newTestEnricher(WithMetrics(nil))
 	_, err := e.Enrich(context.Background(), Item{Name: "Safe"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anatolykoptev/go-enriche/fetch"
 	"github.com/anatolykoptev/go-enriche/maps"
 )
 
@@ -61,8 +60,12 @@ func TestEnrich_ContactsPage_SurfacesEmailHoursHomepageLacks(t *testing.T) {
 	defer srv.Close()
 
 	var discovered, resolved int
-	e := New(
-		WithFetcher(fetch.NewFetcher()),
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// refuses a loopback target — allow it here since contactsURL points at
+		// the local httptest server in these tests (see allowAllTargets).
+		WithTargetGuard(allowAllTargets),
 		WithMapsChecker(&mockMapsChecker{lat: 59.93, lon: 30.33}),
 		WithMetrics(&Metrics{
 			OnContactsPageDiscovered: func() { discovered++ },
@@ -125,8 +128,12 @@ func TestEnrich_ContactsPage_DNIOmitsPhoneKeepsEmailHours(t *testing.T) {
 	})
 	defer srv.Close()
 
-	e := New(
-		WithFetcher(fetch.NewFetcher()),
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// refuses a loopback target — allow it here since contactsURL points at
+		// the local httptest server in these tests (see allowAllTargets).
+		WithTargetGuard(allowAllTargets),
 		WithMapsChecker(&mockMapsCheckerPhone{phone: "+7 813 793 86 15"}),
 	)
 	result, err := e.Enrich(context.Background(), Item{
@@ -161,8 +168,12 @@ func TestEnrich_ContactsPage_RenderErrorShellDegradesToRaw(t *testing.T) {
 	defer srv.Close()
 
 	var renderErrors int
-	e := New(
-		WithFetcher(fetch.NewFetcher()),
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// refuses a loopback target — allow it here since contactsURL points at
+		// the local httptest server in these tests (see allowAllTargets).
+		WithTargetGuard(allowAllTargets),
 		WithMapsChecker(&mockMapsChecker{lat: 59.93, lon: 30.33}),
 		WithBrowserFetch(func(_ context.Context, _ string) (string, error) {
 			// A 200-byte bot-protection error shell — below minRenderShellBytes.
@@ -198,8 +209,12 @@ func TestEnrich_ContactsPage_NoDiscoveryWhenNoLink(t *testing.T) {
 	defer srv.Close()
 
 	var discovered int
-	e := New(
-		WithFetcher(fetch.NewFetcher()),
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// refuses a loopback target — allow it here since contactsURL points at
+		// the local httptest server in these tests (see allowAllTargets).
+		WithTargetGuard(allowAllTargets),
 		WithMapsChecker(&mockMapsChecker{lat: 59.93, lon: 30.33}),
 		WithMetrics(&Metrics{OnContactsPageDiscovered: func() { discovered++ }}),
 	)
@@ -255,8 +270,12 @@ func TestEnrich_PoisonOR_RawDNISurvivesCleanRender(t *testing.T) {
 	srv := newMultiPathServer(map[string]string{"/": dniRawShell})
 	defer srv.Close()
 
-	e := New(
-		WithFetcher(fetch.NewFetcher()),
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// refuses a loopback target — allow it here since contactsURL points at
+		// the local httptest server in these tests (see allowAllTargets).
+		WithTargetGuard(allowAllTargets),
 		WithMapsChecker(&mockMapsChecker{lat: 59.93, lon: 30.33}),
 		WithBrowserFetch(func(_ context.Context, _ string) (string, error) {
 			return dniCleanRendered, nil
@@ -303,8 +322,12 @@ func TestEnrich_ContactsPageDNI_PreservesCleanHomepagePhone(t *testing.T) {
 	})
 	defer srv.Close()
 
-	e := New(
-		WithFetcher(fetch.NewFetcher()),
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// refuses a loopback target — allow it here since contactsURL points at
+		// the local httptest server in these tests (see allowAllTargets).
+		WithTargetGuard(allowAllTargets),
 		// maps returns the rotating-class proxy — it must not survive either, but
 		// the homepage clean phone is what must remain.
 		WithMapsChecker(&mockMapsCheckerPhone{phone: "+7 813 793 86 15"}),
@@ -345,8 +368,12 @@ func TestEnrich_HomepageIsDNI_NoCleanPhoneAnywhere_StillOmits(t *testing.T) {
 	srv := newMultiPathServer(map[string]string{"/": homeDNI})
 	defer srv.Close()
 
-	e := New(
-		WithFetcher(fetch.NewFetcher()),
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// refuses a loopback target — allow it here since contactsURL points at
+		// the local httptest server in these tests (see allowAllTargets).
+		WithTargetGuard(allowAllTargets),
 		WithMapsChecker(&mockMapsCheckerPhone{phone: "+7 813 793 86 15"}),
 	)
 	result, err := e.Enrich(context.Background(), Item{
@@ -395,8 +422,12 @@ func TestEnrich_ContactsPagePoisonOR_RawDNISurvivesCleanRender(t *testing.T) {
 	})
 	defer srv.Close()
 
-	e := New(
-		WithFetcher(fetch.NewFetcher()),
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// refuses a loopback target — allow it here since contactsURL points at
+		// the local httptest server in these tests (see allowAllTargets).
+		WithTargetGuard(allowAllTargets),
 		WithMapsChecker(&mockMapsChecker{lat: 59.93, lon: 30.33}),
 		WithBrowserFetch(func(_ context.Context, url string) (string, error) {
 			// Render only the /contacts page to the clean DOM. (The homepage is
@@ -462,8 +493,12 @@ func TestEnrich_ContactsPageGate_CompleteHomepageSkipsFetch(t *testing.T) {
 	defer srv.Close()
 
 	var discovered int
-	e := New(
-		WithFetcher(fetch.NewFetcher()),
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// refuses a loopback target — allow it here since contactsURL points at
+		// the local httptest server in these tests (see allowAllTargets).
+		WithTargetGuard(allowAllTargets),
 		WithMapsChecker(&mockMapsChecker{lat: 59.93, lon: 30.33}),
 		WithMetrics(&Metrics{OnContactsPageDiscovered: func() { discovered++ }}),
 	)
@@ -489,8 +524,12 @@ func TestEnrich_ContactsPageGate_PhoneOnlyHomepageStillFetches(t *testing.T) {
 	defer srv.Close()
 
 	var discovered, resolved int
-	e := New(
-		WithFetcher(fetch.NewFetcher()),
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// refuses a loopback target — allow it here since contactsURL points at
+		// the local httptest server in these tests (see allowAllTargets).
+		WithTargetGuard(allowAllTargets),
 		WithMapsChecker(&mockMapsChecker{lat: 59.93, lon: 30.33}),
 		WithMetrics(&Metrics{
 			OnContactsPageDiscovered: func() { discovered++ },
@@ -531,8 +570,12 @@ func TestEnrich_ContactsPage_EqualSourceOverwrite(t *testing.T) {
 	})
 	defer srv.Close()
 
-	e := New(
-		WithFetcher(fetch.NewFetcher()),
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// refuses a loopback target — allow it here since contactsURL points at
+		// the local httptest server in these tests (see allowAllTargets).
+		WithTargetGuard(allowAllTargets),
 		WithMapsChecker(&mockMapsChecker{lat: 59.93, lon: 30.33}),
 	)
 	result, err := e.Enrich(context.Background(), Item{
@@ -574,8 +617,12 @@ func TestEnrich_ContactsPage_LongerAddressWinsEqualSource(t *testing.T) {
 	})
 	defer srv.Close()
 
-	e := New(
-		WithFetcher(fetch.NewFetcher()),
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// refuses a loopback target — allow it here since contactsURL points at
+		// the local httptest server in these tests (see allowAllTargets).
+		WithTargetGuard(allowAllTargets),
 		WithMapsChecker(&mockMapsChecker{lat: 59.93, lon: 30.33}),
 	)
 	result, err := e.Enrich(context.Background(), Item{
