@@ -11,6 +11,16 @@ func isYandexMapsOrgURL(u string) bool {
 		strings.Contains(u, "yandex.com/maps/org")
 }
 
+// Raw status values embedded in a Yandex Maps org page's JSON, as returned
+// by parseOrgStatus / fetchOrgStatus — Yandex's wire vocabulary, kept distinct
+// from our own PlaceStatus enum (checker.go) even though "open" is textually
+// identical, since the two are conceptually different vocabularies.
+const (
+	yandexStatusPermanentClosed = "permanent-closed"
+	yandexStatusTemporaryClosed = "temporary-closed"
+	yandexStatusOpen            = "open"
+)
+
 // statusRe matches "status":"<value>" in embedded JSON on Yandex Maps org pages.
 var statusRe = regexp.MustCompile(`"status"\s*:\s*"(permanent-closed|temporary-closed|open)"`)
 

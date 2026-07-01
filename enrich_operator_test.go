@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/anatolykoptev/go-enriche/fetch"
 	"github.com/anatolykoptev/go-enriche/maps"
 )
 
@@ -32,7 +31,7 @@ func TestEnrich_OperatorVerified_SurvivesReEnrich(t *testing.T) {
 		OrgData: &maps.OrgData{Name: "Royal Wedding", Phone: mapsPhone},
 	}}
 
-	e := New(WithFetcher(fetch.NewFetcher()), WithMapsChecker(checker))
+	e := newTestEnricher(WithFetcher(testFetcher()), WithMapsChecker(checker))
 	result, err := e.Enrich(context.Background(), Item{
 		Name: "Royal Wedding", URL: srv.URL, City: spbCity, Mode: ModePlaces,
 		Seed: SeedFacts{Phone: operatorPhone}, // operator override

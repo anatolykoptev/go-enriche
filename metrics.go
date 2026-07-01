@@ -63,6 +63,20 @@ type Metrics struct {
 	// (enrich_address_legal_vs_venue_total) gives that previously-silent class a
 	// signal so a wrong-map-link regression is observable, not just perceived.
 	OnLegalVsVenueAddress func()
+
+	// OnTargetBlocked fires once per URL the SSRF target guard
+	// (Enricher.checkTarget) REFUSED before handing it to an external
+	// render/extraction delegate (oxBrowser.Extract, browserFetch) — a
+	// security refusal, not a render failure. Kept distinct from
+	// OnBrowserRenderError (a genuine go-wowa render failure/error-shell) so
+	// SSRF refusals never inflate the real render-error rate.
+	// site identifies which render-delegate call site fired:
+	//   "homepage_render"          — browserFetch(item.URL) in fetchAndExtract
+	//   "contacts_page_render"     — browserFetch(contactsURL) in fetchContactsHTML
+	//   "ox_browser_item"          — oxBrowser.Extract(item.URL) in fetchAndExtract
+	//   "ox_browser_search_source" — oxBrowser.Extract(srcURL) in fetchOneSource
+	// (enrich_target_blocked_total{site}).
+	OnTargetBlocked func(site string)
 }
 
 func (m *Metrics) cacheHit() {
@@ -140,5 +154,11 @@ func (m *Metrics) contactsPageResolved() {
 func (m *Metrics) legalVsVenueAddress() {
 	if m != nil && m.OnLegalVsVenueAddress != nil {
 		m.OnLegalVsVenueAddress()
+	}
+}
+
+func (m *Metrics) targetBlocked(site string) {
+	if m != nil && m.OnTargetBlocked != nil && site != "" {
+		m.OnTargetBlocked(site)
 	}
 }

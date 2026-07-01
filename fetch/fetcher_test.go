@@ -11,6 +11,17 @@ import (
 	"time"
 )
 
+// newUnguardedFetcher builds a Fetcher whose client skips the default SSRF
+// guard (see ssrf.go / ssrf_test.go), for tests exercising fetcher behavior
+// (redirects, timeouts, singleflight, body limits) against a local httptest
+// server — a legitimate loopback target in a test, but one the guarded
+// default correctly refuses. Uses the pre-existing WithClient escape hatch,
+// same as any other caller opting out of the default guard.
+func newUnguardedFetcher(opts ...Option) *Fetcher {
+	base := []Option{WithClient(&http.Client{Timeout: DefaultTimeout})}
+	return NewFetcher(append(base, opts...)...)
+}
+
 func TestFetch_Success(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -19,7 +30,7 @@ func TestFetch_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := NewFetcher()
+	f := newUnguardedFetcher()
 	result, err := f.Fetch(context.Background(), srv.URL)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -42,7 +53,7 @@ func TestFetch_NotFound(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := NewFetcher()
+	f := newUnguardedFetcher()
 	result, err := f.Fetch(context.Background(), srv.URL)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -62,7 +73,7 @@ func TestFetch_ServerError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := NewFetcher()
+	f := newUnguardedFetcher()
 	result, err := f.Fetch(context.Background(), srv.URL)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -88,7 +99,7 @@ func TestFetch_DomainRedirect(t *testing.T) {
 	}))
 	defer origin.Close()
 
-	f := NewFetcher()
+	f := newUnguardedFetcher()
 	result, err := f.Fetch(context.Background(), origin.URL)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -113,7 +124,7 @@ func TestFetch_SameDomainRedirect(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := NewFetcher()
+	f := newUnguardedFetcher()
 	result, err := f.Fetch(context.Background(), srv.URL)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -134,7 +145,7 @@ func TestFetch_Timeout(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := NewFetcher(WithTimeout(100 * time.Millisecond))
+	f := newUnguardedFetcher(WithTimeout(100 * time.Millisecond))
 	result, err := f.Fetch(context.Background(), srv.URL)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -153,7 +164,7 @@ func TestFetch_MaxBodyBytes(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := NewFetcher(WithMaxBodyBytes(100))
+	f := newUnguardedFetcher(WithMaxBodyBytes(100))
 	result, err := f.Fetch(context.Background(), srv.URL)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -165,7 +176,7 @@ func TestFetch_MaxBodyBytes(t *testing.T) {
 
 func TestFetch_EmptyURL(t *testing.T) {
 	t.Parallel()
-	f := NewFetcher()
+	f := newUnguardedFetcher()
 	_, err := f.Fetch(context.Background(), "")
 	if err == nil {
 		t.Error("expected error for empty URL")
@@ -174,7 +185,7 @@ func TestFetch_EmptyURL(t *testing.T) {
 
 func TestFetch_InvalidURL(t *testing.T) {
 	t.Parallel()
-	f := NewFetcher()
+	f := newUnguardedFetcher()
 	result, err := f.Fetch(context.Background(), "not-a-url")
 	if err != nil {
 		return // Error is acceptable.
@@ -195,7 +206,7 @@ func TestFetch_Singleflight(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := NewFetcher()
+	f := newUnguardedFetcher()
 	var wg sync.WaitGroup
 	const concurrency = 10
 	results := make([]*FetchResult, concurrency)
@@ -235,7 +246,7 @@ func TestFetch_ContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately.
 
-	f := NewFetcher()
+	f := newUnguardedFetcher()
 	result, err := f.Fetch(ctx, srv.URL)
 	if err != nil {
 		return // Error for canceled context is acceptable.

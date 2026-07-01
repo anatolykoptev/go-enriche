@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/anatolykoptev/go-enriche/cache"
-	"github.com/anatolykoptev/go-enriche/fetch"
 	"github.com/anatolykoptev/go-enriche/maps"
 )
 
@@ -35,8 +34,8 @@ func TestEnrich_Cache_SeedNotBypassed(t *testing.T) {
 	}}
 
 	mem := cache.NewMemory()
-	e := New(
-		WithFetcher(fetch.NewFetcher()),
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
 		WithMapsChecker(checker),
 		WithCache(mem),
 		WithCacheTTL(time.Hour),
@@ -69,8 +68,8 @@ func TestEnrich_Cache_SeedNotBypassed(t *testing.T) {
 
 	// 3) A second seeded call with the SAME seed SHOULD hit the cache (same key).
 	counts := 0
-	memCounting := New(
-		WithFetcher(fetch.NewFetcher()),
+	memCounting := newTestEnricher(
+		WithFetcher(testFetcher()),
 		WithMapsChecker(checker),
 		WithCache(mem),
 		WithCacheTTL(time.Hour),

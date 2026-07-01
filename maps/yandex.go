@@ -229,9 +229,9 @@ func (y *YandexMaps) fetchAndParse(ctx context.Context, orgURL string) (*CheckRe
 	}
 	result := &CheckResult{MapURL: orgURL}
 	switch status {
-	case "permanent-closed":
+	case yandexStatusPermanentClosed:
 		result.Status = PlacePermanentClosed
-	case "temporary-closed":
+	case yandexStatusTemporaryClosed:
 		result.Status = PlaceTemporaryClosed
 	default:
 		result.Status = PlaceOpen

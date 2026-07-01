@@ -58,7 +58,7 @@ func TestEnrich_DNISite_MapsPhone_Omitted(t *testing.T) {
 	t.Parallel()
 	srv := newDNISite(t)
 
-	e := New(WithMapsChecker(dniPhoneMapsChecker{phone: "+7 813 793 86 16"}))
+	e := newTestEnricher(WithMapsChecker(dniPhoneMapsChecker{phone: "+7 813 793 86 16"}))
 	result, err := e.Enrich(context.Background(), Item{
 		Name: "Игора Драйв", URL: srv.URL, City: "Санкт-Петербург", Mode: ModePlaces,
 	})
@@ -82,7 +82,7 @@ func TestEnrich_DNISite_MapsPhone_SearchDoesNotRefill(t *testing.T) {
 	t.Parallel()
 	srv := newDNISite(t)
 
-	e := New(
+	e := newTestEnricher(
 		WithMapsChecker(dniPhoneMapsChecker{phone: "+7 813 793 86 16"}),
 		WithSearch(&mockProvider{result: &search.SearchResult{
 			Context: "Телефон: +7 (812) 111 22 33 для записи на картинг",
@@ -106,7 +106,7 @@ func TestEnrich_DNISite_OperatorSeed_Wins(t *testing.T) {
 	t.Parallel()
 	srv := newDNISite(t)
 
-	e := New(WithMapsChecker(dniPhoneMapsChecker{phone: "+7 813 793 86 16"}))
+	e := newTestEnricher(WithMapsChecker(dniPhoneMapsChecker{phone: "+7 813 793 86 16"}))
 	result, err := e.Enrich(context.Background(), Item{
 		Name: "Игора Драйв", URL: srv.URL, City: "Санкт-Петербург", Mode: ModePlaces,
 		Seed: SeedFacts{Phone: "+7 (812) 615 70 00"},

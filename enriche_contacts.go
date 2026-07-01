@@ -142,6 +142,18 @@ func (e *Enricher) fetchContactsHTML(ctx context.Context, contactsURL string, it
 		return rawHTML, rawPoisoned // raw already carries contacts — no render needed
 	}
 
+	// This render fires whenever the raw contacts fetch was thin/contactless —
+	// including when e.fetchWithRetry above refused the target outright (Guard A
+	// on fetch.Fetcher's transport), leaving rawHTML == "". browserFetch is an
+	// external delegate this package does not control the dial for, so that
+	// refusal is NOT inherited here; gate contactsURL explicitly (SSRF guard,
+	// see checkTarget) before handing it off.
+	if err := e.checkTarget(ctx, contactsURL); err != nil {
+		e.metrics.targetBlocked("contacts_page_render")
+		e.logger.DebugContext(ctx, "enriche: contacts page render target blocked", "url", contactsURL, "err", err)
+		return rawHTML, rawPoisoned
+	}
+
 	rendered, err := e.browserFetch(ctx, contactsURL)
 	if err != nil || len(rendered) < minRenderShellBytes {
 		// Render failed or returned a bot-protection error shell — degrade to the

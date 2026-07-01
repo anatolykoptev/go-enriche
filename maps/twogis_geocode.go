@@ -10,6 +10,11 @@ import (
 	"strings"
 )
 
+// twoGISItemTypeBuilding is the 2GIS /items/geocode item.type value for
+// exact building-level address resolution (see the accept-set comment on
+// the precision gate below).
+const twoGISItemTypeBuilding = "building"
+
 // twoGISGeocodeURL is the base URL for the 2GIS Geocoder endpoint.
 // Overridable in tests via package-level assignment.
 var twoGISGeocodeURL = "https://catalog.api.2gis.com/3.0/items/geocode" //nolint:gochecknoglobals
@@ -124,7 +129,7 @@ func (g *TwoGISGeocoder) Check(ctx context.Context, _, city, address string) (*C
 		if item.Point == nil {
 			continue
 		}
-		if item.Type != "building" && item.Type != "branch" {
+		if item.Type != twoGISItemTypeBuilding && item.Type != "branch" {
 			continue
 		}
 		od := &OrgData{

@@ -22,9 +22,19 @@ func WithFetcher(f *fetch.Fetcher) Option {
 }
 
 // WithStealth creates a Fetcher using a stealth HTTP client.
+//
+// fetch.WithClient REPLACES the Fetcher's client wholesale, which would
+// otherwise silently bypass NewFetcher's default SSRF guard — a real escape
+// hatch, since a stealth client is this org's production HTTP pattern
+// (go-stealth/go-wowa) and the caller-supplied URL it fetches is exactly the
+// untrusted input the guard exists for. fetch.GuardClient composes the guard
+// into c's Transport instead (connect-time DialContext wrap for a plain
+// *http.Transport, or a request-level pre-check wrap for an opaque
+// RoundTripper such as go-stealth's fingerprinting client) without touching
+// c's TLS/JA3/proxy/middleware configuration.
 func WithStealth(c *http.Client) Option {
 	return func(e *Enricher) {
-		e.fetcher = fetch.NewFetcher(fetch.WithClient(c))
+		e.fetcher = fetch.NewFetcher(fetch.WithClient(fetch.GuardClient(c)))
 	}
 }
 
@@ -111,6 +121,25 @@ func WithOxBrowser(baseURL string) Option {
 	return func(e *Enricher) {
 		if baseURL != "" {
 			e.oxBrowser = fetch.NewOxBrowserClient(baseURL)
+		}
+	}
+}
+
+// WithTargetGuard overrides the SSRF safety check run on a URL before it is
+// handed to an external render/extraction delegate (oxBrowser, browserFetch)
+// — a hop this package does not control the outbound dial for, so
+// fetch.Fetcher's own guarded transport (see fetch/ssrf.go) cannot protect
+// it. Defaults to fetch.CheckSSRFSafe, which refuses loopback, private
+// (RFC1918/RFC4193), link-local (including the 169.254.169.254 cloud-metadata
+// address), unspecified, and multicast targets.
+//
+// Production callers should not override this — it exists so tests can point
+// oxBrowser/browserFetch at a local httptest server. Passing a nil fn is a
+// no-op (the current guard, or the New() default, is kept).
+func WithTargetGuard(fn func(ctx context.Context, rawURL string) error) Option {
+	return func(e *Enricher) {
+		if fn != nil {
+			e.targetGuard = fn
 		}
 	}
 }

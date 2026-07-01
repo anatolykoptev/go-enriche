@@ -46,11 +46,17 @@ func WithTimeout(d time.Duration) Option {
 	return func(f *Fetcher) { f.client.Timeout = d }
 }
 
-// NewFetcher creates a Fetcher with the given options.
+// NewFetcher creates a Fetcher with the given options. The default client is
+// SSRF-guarded (see ssrf.go): it refuses to connect to loopback, private,
+// link-local, unspecified, or multicast addresses, since rawURL passed to
+// Fetch is caller-supplied by design (e.g. an advertiser-provided website
+// field) and must never be able to reach internal infrastructure. Pass
+// WithClient to opt out (e.g. for a test hitting a local httptest server).
 func NewFetcher(opts ...Option) *Fetcher {
 	f := &Fetcher{
 		client: &http.Client{
-			Timeout: DefaultTimeout,
+			Timeout:   DefaultTimeout,
+			Transport: guardedTransport(),
 		},
 		maxBodyBytes: DefaultMaxBodyBytes,
 	}
@@ -98,7 +104,7 @@ func (f *Fetcher) doFetch(ctx context.Context, rawURL string) (*FetchResult, err
 		return &FetchResult{Status: StatusUnreachable}, nil
 	}
 
-	resp, err := client.Do(req) //nolint:gosec // URL is user-provided by design
+	resp, err := client.Do(req) //nolint:gosec // URL is user-provided by design; guarded against internal targets by NewFetcher's default transport (see ssrf.go)
 	if err != nil {
 		return &FetchResult{Status: StatusUnreachable}, nil
 	}

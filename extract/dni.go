@@ -29,13 +29,17 @@ import (
 // present, an injected tel:/microdata phone is NOT the venue's own line — only a
 // DNI-immune source (a hard-coded social-link phone) can be trusted. Signature
 // match over already-fetched HTML only: no cross-fetch rotation, no screenshot.
+// dniVendorRoistat is the canonical vendor name for the roistat.com DNI/
+// call-tracking service (see dniVendorSignatures below).
+const dniVendorRoistat = "roistat"
+
 var dniVendorSignatures = []struct {
 	vendor       string
 	srcTokens    []string // matched in a <script src> URL (vendor loader)
 	configTokens []string // matched in inline <script> text, init-shaped only
 }{
 	{
-		vendor:       "roistat",
+		vendor:       dniVendorRoistat,
 		srcTokens:    []string{"roistat.com", "roistat.js"},
 		configTokens: []string{"window.roistat", "roistatprojectid", "roistat.init", "roistatcompanyid"},
 	},

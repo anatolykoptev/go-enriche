@@ -4,8 +4,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-
-	"github.com/anatolykoptev/go-enriche/fetch"
 )
 
 // richTextNoContacts is a text-rich article page (passes minExtractChars) that
@@ -49,8 +47,8 @@ func TestEnrich_BrowserRender_AbsentContacts_SurfacesJSInjected(t *testing.T) {
 
 	var renderURL string
 	var renderReasons []string
-	e := New(
-		WithFetcher(fetch.NewFetcher()),
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
 		WithMapsChecker(&mockMapsChecker{lat: 59.93, lon: 30.33}),
 		WithBrowserFetch(func(_ context.Context, url string) (string, error) {
 			renderURL = url
@@ -98,8 +96,8 @@ func TestEnrich_BrowserRender_ContactsPresent_NoRender(t *testing.T) {
 	defer srv.Close()
 
 	rendered := false
-	e := New(
-		WithFetcher(fetch.NewFetcher()),
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
 		WithMapsChecker(&mockMapsChecker{lat: 59.93, lon: 30.33}),
 		WithBrowserFetch(func(_ context.Context, _ string) (string, error) {
 			rendered = true
@@ -124,8 +122,8 @@ func TestEnrich_BrowserRender_ThinContent_Reason(t *testing.T) {
 	defer srv.Close()
 
 	var reasons []string
-	e := New(
-		WithFetcher(fetch.NewFetcher()),
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
 		WithBrowserFetch(func(_ context.Context, _ string) (string, error) {
 			return renderedWithContacts, nil
 		}),
@@ -151,8 +149,8 @@ func TestEnrich_BrowserRender_NoNewFacts_KeepsRaw(t *testing.T) {
 	srv := newTestServer(richTextNoContacts, 200)
 	defer srv.Close()
 
-	e := New(
-		WithFetcher(fetch.NewFetcher()),
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
 		WithBrowserFetch(func(_ context.Context, _ string) (string, error) {
 			return richTextNoContacts, nil // render surfaces nothing new
 		}),
