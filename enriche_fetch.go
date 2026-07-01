@@ -23,6 +23,15 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 	if e.oxBrowser != nil {
 		oxCh = make(chan *oxResult, 1)
 		go func() {
+			// item.URL is caller-supplied (e.g. an advertiser website field) and
+			// ox-browser fetches it server-side in a different process, so
+			// fetch.Fetcher's dial-time guard cannot protect this hop — gate the
+			// target explicitly before dispatch (SSRF guard, see checkTarget).
+			if err := e.checkTarget(ctx, item.URL); err != nil {
+				e.logger.DebugContext(ctx, "enriche: ox-browser target blocked", "url", item.URL, "err", err)
+				oxCh <- nil
+				return
+			}
 			ox, err := e.oxBrowser.Extract(ctx, item.URL)
 			if err != nil {
 				e.logger.DebugContext(ctx, "enriche: ox-browser failed", "url", item.URL, "err", err)
