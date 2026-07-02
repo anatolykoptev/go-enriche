@@ -241,6 +241,161 @@ func TestEnrich_ContactsPage_NoDiscoveryWhenNoLink(t *testing.T) {
 	}
 }
 
+// homeRichNoPhoneLinksContacts is a homepage complete on hours/email/address
+// but with ZERO phone at all — homepageMissingRichField's anchored-phone leg
+// fires regardless of the other fields, so /contacts discovery still runs.
+const homeRichNoPhoneLinksContacts = `<!DOCTYPE html><html lang="ru"><head><title>Кафе</title></head>
+<body><article><h1>О кафе</h1>
+<p>Уютное кафе в центре города. Мы готовим вкусные блюда из свежих продуктов
+каждый день и рады гостям с самого утра до позднего вечера. Большой выбор
+напитков, десертов и сезонное меню. Приходите всей семьёй — у нас уютно.</p>
+<a href="mailto:hello@cafe.ru">hello@cafe.ru</a>
+<address>Невский проспект, 28</address>
+<div><span>Часы работы</span><span>Пн-Вс 10:00-22:00</span></div>
+<nav><a href="/contacts/">Контакты</a></nav>
+</article></body></html>`
+
+// contactsPagePhoneOnlyAnchored is a /contacts page whose ONLY fact is a
+// single anchored (contacts-region) tel: — strictly FEWER structured facts
+// (1) than homeRichNoPhoneLinksContacts (3: address+hours+email), so the
+// richness gate (contactFactCount) must skip the Facts MERGE entirely.
+const contactsPagePhoneOnlyAnchored = `<!DOCTYPE html><html lang="ru"><head><title>Контакты</title></head>
+<body><div class="contacts">
+<a href="tel:+78120000099">+7 (812) 000-00-99</a>
+</div></body></html>`
+
+// TestEnrich_ContactsPage_SiteNumbersSurviveRichnessGate is the FIX-1
+// headline: a homepage complete on hours/email/address but with NO phone
+// triggers /contacts discovery (homepageMissingRichField's anchored-phone
+// leg). The /contacts page carries ONLY an anchored tel: — fewer structured
+// facts than the homepage — so contactFactCount's richness gate must skip
+// the Facts MERGE (Facts.Phone stays nil, additive-only guarantee: the
+// single-winner path is untouched). But the full candidate-set sidecar
+// (Result.SiteNumbers) must still pick up that anchored phone: it
+// accumulates from EVERY page actually fetched+parsed, independent of the
+// richness gate that governs only the single-winner merge. Before the fix,
+// addSiteNumbers sat AFTER the early return and this candidate was silently
+// dropped — the feature's own headline case doing nothing.
+func TestEnrich_ContactsPage_SiteNumbersSurviveRichnessGate(t *testing.T) {
+	t.Parallel()
+	srv := newMultiPathServer(map[string]string{
+		"/":          homeRichNoPhoneLinksContacts,
+		"/contacts/": contactsPagePhoneOnlyAnchored,
+	})
+	defer srv.Close()
+
+	var discovered, resolved int
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		// Guard-B (checkTarget) defaults to the real httputil.CheckRawURL (go-kit), which
+		// refuses a loopback target — allow it here since contactsURL points at
+		// the local httptest server in these tests (see allowAllTargets).
+		WithTargetGuard(allowAllTargets),
+		WithMapsChecker(&mockMapsChecker{lat: 59.93, lon: 30.33}),
+		WithMetrics(&Metrics{
+			OnContactsPageDiscovered: func() { discovered++ },
+			OnContactsPageResolved:   func() { resolved++ },
+		}),
+	)
+	result, err := e.Enrich(context.Background(), Item{
+		Name: "Кафе", URL: srv.URL + "/", City: "Санкт-Петербург", Mode: ModePlaces,
+	})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+	if discovered != 1 {
+		t.Fatalf("OnContactsPageDiscovered = %d, want 1 (homepage has zero phone, must still discover /contacts)", discovered)
+	}
+	// The richness gate must skip the Facts MERGE: the /contacts page (1
+	// fact: the phone) is not strictly richer than the homepage (3 facts:
+	// address+hours+email), so resolved must stay 0 and Facts.Phone nil.
+	if resolved != 0 {
+		t.Fatalf("OnContactsPageResolved = %d, want 0 (richness gate must skip the Facts merge for a no-richer contacts page)", resolved)
+	}
+	if result.Facts.Phone != nil {
+		t.Fatalf("Facts.Phone = %q, want nil (richness gate skipped the merge — Facts.Phone must stay byte-stable)", *result.Facts.Phone)
+	}
+	found := false
+	for _, n := range result.SiteNumbers {
+		if strings.Contains(n.Value, "000-00-99") {
+			found = true
+			if !n.Anchored || !n.Trustworthy {
+				t.Errorf("SiteNumbers entry for 000-00-99 = %+v, want Anchored=true Trustworthy=true", n)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("SiteNumbers missing the /contacts anchored phone (richness-gate-skipped page); got %+v", result.SiteNumbers)
+	}
+}
+
+// homeWeakPhoneLinksContacts carries a phone as a WEAK, plain body tel:
+// (tierBody — not anchored, not Trustworthy) and links /contacts. Missing
+// hours/email/address, so /contacts discovery fires regardless of the
+// anchored-phone leg.
+const homeWeakPhoneLinksContacts = `<!DOCTYPE html><html lang="ru"><head><title>Студия</title></head>
+<body><article><h1>О студии</h1>
+<p>Студия работает уже много лет и помогает клиентам с самыми разными задачами.
+Мы гордимся качеством работы и вниманием к каждому проекту, большим и малым.
+Обращайтесь в любое время — всегда рады новым клиентам и их идеям.</p>
+Звоните: <a href="tel:+78120001122">+7 (812) 000-11-22</a>
+<nav><a href="/contacts/">Контакты</a></nav>
+</article></body></html>`
+
+// contactsPageStrongSamePhone carries the SAME digits as an ANCHORED,
+// Trustworthy contacts-region tel: (tierContacts) plus an email — strictly
+// richer than homeWeakPhoneLinksContacts, so the richness gate does not
+// skip the merge.
+const contactsPageStrongSamePhone = `<!DOCTYPE html><html lang="ru"><head><title>Контакты</title></head>
+<body><div class="contacts">
+<a href="tel:+78120001122">+7 (812) 000-11-22</a>
+<a href="mailto:studio@example.ru">studio@example.ru</a>
+</div></body></html>`
+
+// TestEnrich_SiteNumbersSnapshot_HigherRankReadingWins is the FIX-5
+// headline: the SAME phone number appears on BOTH the homepage (a weak,
+// unanchored body tel:) and the /contacts page (an anchored, Trustworthy
+// contacts-region tel:). siteNumbersSnapshot's dedup must keep the
+// STRONGER (Trustworthy) reading, not whichever page happened to merge
+// first or last.
+func TestEnrich_SiteNumbersSnapshot_HigherRankReadingWins(t *testing.T) {
+	t.Parallel()
+	srv := newMultiPathServer(map[string]string{
+		"/":          homeWeakPhoneLinksContacts,
+		"/contacts/": contactsPageStrongSamePhone,
+	})
+	defer srv.Close()
+
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		// Guard-B (checkTarget) defaults to the real httputil.CheckRawURL (go-kit), which
+		// refuses a loopback target — allow it here since contactsURL points at
+		// the local httptest server in these tests (see allowAllTargets).
+		WithTargetGuard(allowAllTargets),
+		WithMapsChecker(&mockMapsChecker{lat: 59.93, lon: 30.33}),
+	)
+	result, err := e.Enrich(context.Background(), Item{
+		Name: "Студия", URL: srv.URL + "/", City: "Санкт-Петербург", Mode: ModePlaces,
+	})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+
+	var matches int
+	for _, n := range result.SiteNumbers {
+		if !strings.Contains(n.Value, "000-11-22") {
+			continue
+		}
+		matches++
+		if !n.Anchored || !n.Trustworthy {
+			t.Errorf("SiteNumbers entry for 000-11-22 = %+v, want the STRONGER (Anchored=true Trustworthy=true) contacts-page reading to survive the dedup, not the weak homepage body-tel: reading", n)
+		}
+	}
+	if matches != 1 {
+		t.Fatalf("SiteNumbers has %d entries for 000-11-22, want exactly 1 (deduped across homepage + /contacts)", matches)
+	}
+}
+
 // mockMapsCheckerPhone returns a maps card carrying a phone (the rotating-class
 // number a DNI venue's maps entry often holds) so the DNI-poison test can prove
 // the maps phone does NOT survive a contacts-page poison verdict.

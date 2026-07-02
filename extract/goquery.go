@@ -36,12 +36,38 @@ var removeSelectors = strings.Join([]string{
 const contentSelectors = "article, main, .content, .post-content, .article-content, #content"
 
 // stripBoilerplate removes non-content HTML elements (script/style/nav/ads/...
-// — see removeSelectors) from doc in place. Shared by ExtractGoquery's content
-// extraction below and by applyRegexFallback's junk-avoidance scoping
-// (extract/facts.go) — a CSS/script decimal must never surface as a
-// regex-matched "phone" (the Novoclinic bug).
+// — see removeSelectors) from doc in place. Used ONLY by ExtractGoquery's own
+// main-content extraction below — NOT by applyRegexFallback (extract/facts.go),
+// which needs the much narrower stripNoise (see its doc comment for why).
 func stripBoilerplate(doc *goquery.Document) {
 	doc.Find(removeSelectors).Each(func(_ int, s *goquery.Selection) {
+		s.Remove()
+	})
+}
+
+// removeNoiseSelectors are non-textual elements that can never legitimately
+// carry a phone/address/price value: script/style payloads, embedded
+// iframes/SVG icons, and the document <head> (title/meta/inline <style>).
+// Deliberately narrower than removeSelectors: applyRegexFallback's
+// junk-avoidance scoping (extract/facts.go) must strip a CSS/script decimal
+// before it can misread as a phone number (the Novoclinic bug — see
+// stripNoiseHTML in facts.go) WITHOUT also stripping header/footer/nav/aside/
+// .widget/.banner/[role=contentinfo] the way removeSelectors does. Those
+// containers legitimately carry a RU-SMB venue's plain-text contact info —
+// on a real Tilda-built page (novoclinicspb.ru) EVERY content block,
+// including the venue's own phone number, carries a literal "widget" class
+// token (Tilda's universal block-wrapper convention, not a sidebar widget),
+// so removeSelectors' ".widget" selector would strip the phone itself.
+var removeNoiseSelectors = strings.Join([]string{
+	"script", "style", "noscript", "template", "svg", "head",
+}, ", ")
+
+// stripNoise removes only the non-textual, never-a-contact-value elements
+// (see removeNoiseSelectors) from doc in place — the narrow scope
+// applyRegexFallback's junk-avoidance needs, as opposed to stripBoilerplate's
+// full main-content strip.
+func stripNoise(doc *goquery.Document) {
+	doc.Find(removeNoiseSelectors).Each(func(_ int, s *goquery.Selection) {
 		s.Remove()
 	})
 }

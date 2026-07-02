@@ -423,19 +423,20 @@ func (r *resolver) snapshot() Provenance {
 // evidence found for a number must not be lost to whichever page happened to
 // merge second.
 func (r *resolver) addSiteNumbers(nums []extract.PhoneNumberFact) {
-	for _, n := range nums {
-		key := phoneDigitKey(n.Value)
-		if key == "" {
-			continue
-		}
-		if i := siteNumberIndex(r.siteNumbers, key); i >= 0 {
-			if siteNumberRank(n) > siteNumberRank(r.siteNumbers[i]) {
-				r.siteNumbers[i] = n
-			}
-			continue
-		}
-		r.siteNumbers = append(r.siteNumbers, n)
+	if len(nums) == 0 {
+		return
 	}
+	// extract.DedupeKeepStronger is the SAME keyed-dedupe-keep-strongest
+	// mechanism CollectSiteNumbers (extract/sitenumbers.go) uses — merging
+	// the new page's candidates into the existing accumulated set on every
+	// call is the incremental form of the same "same key, keep the
+	// strongest reading" rule, so the two no longer hand-roll independent
+	// copies of it.
+	r.siteNumbers = extract.DedupeKeepStronger(
+		append(r.siteNumbers, nums...),
+		func(n extract.PhoneNumberFact) string { return extract.DigitsOnly(n.Value) },
+		siteNumberRank,
+	)
 }
 
 // siteNumbersSnapshot returns the accumulated SiteNumbers set in a stable,
@@ -455,20 +456,9 @@ func (r *resolver) siteNumbersSnapshot() []extract.PhoneNumberFact {
 		if ri != rj {
 			return ri > rj
 		}
-		return phoneDigitKey(out[i].Value) < phoneDigitKey(out[j].Value)
+		return extract.DigitsOnly(out[i].Value) < extract.DigitsOnly(out[j].Value)
 	})
 	return out
-}
-
-// siteNumberIndex returns the index of the first entry in nums whose
-// normalized digits equal key, or -1 when none matches.
-func siteNumberIndex(nums []extract.PhoneNumberFact, key string) int {
-	for i, n := range nums {
-		if phoneDigitKey(n.Value) == key {
-			return i
-		}
-	}
-	return -1
 }
 
 // siteNumberRank is the dedup tiebreak / sort key for a PhoneNumberFact:
@@ -484,19 +474,6 @@ func siteNumberRank(n extract.PhoneNumberFact) int {
 		rank += 2
 	}
 	return rank
-}
-
-// phoneDigitKey normalizes a phone display value to its bare digits for
-// dedup/sort purposes. A small local helper (not extract.reDigitsOnly, which
-// is unexported) — package enriche only ever needs this one normalization.
-func phoneDigitKey(v string) string {
-	digits := make([]byte, 0, len(v))
-	for i := 0; i < len(v); i++ {
-		if c := v[i]; c >= '0' && c <= '9' {
-			digits = append(digits, c)
-		}
-	}
-	return string(digits)
 }
 
 // derefStr returns the pointee or "" for a nil *string.

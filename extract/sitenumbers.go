@@ -43,15 +43,15 @@ type PhoneNumberFact struct {
 	// Trustworthy for why a per-candidate DNI matcher must not be
 	// introduced.
 	DNI bool
-	// Trustworthy is the COMMITTED verdict, computed by reusing the
-	// EXISTING fail-closed page-level DNI gate verbatim
-	// (resolvePhoneForCityDNI's own branch): when DNI is true, ONLY a
-	// social-link candidate (Source == "social_link") is Trustworthy;
-	// otherwise every Anchored candidate is. This must never diverge from
-	// what resolvePhoneForCityDNI would decide for the same page — a
-	// second, independent per-candidate DNI heuristic here would risk an
-	// unlisted vendor failing OPEN (a rotating proxy marked Trustworthy)
-	// where the resolver fails closed.
+	// Trustworthy is the COMMITTED verdict, computed via dniTrustworthy
+	// (contacts.go) — the SAME shared predicate resolvePhoneForCityDNI's own
+	// DNI branch calls: when DNI is true, ONLY a social-link candidate
+	// (Source == "social_link") is Trustworthy; otherwise every Anchored
+	// candidate is. Sharing one predicate means this can never diverge from
+	// what resolvePhoneForCityDNI decides for the same page — a second,
+	// independent per-candidate DNI heuristic here would risk an unlisted
+	// vendor failing OPEN (a rotating proxy marked Trustworthy) where the
+	// resolver fails closed.
 	Trustworthy bool
 }
 
@@ -94,17 +94,6 @@ func numberIsAnchored(tier int) bool {
 	}
 }
 
-// numberIsTrustworthy is the COMMITTED Trustworthy verdict — see
-// PhoneNumberFact.Trustworthy's doc comment. It is byte-for-byte the same
-// branch resolvePhoneForCityDNI takes: DNI active -> social-link only;
-// otherwise -> every anchored candidate.
-func numberIsTrustworthy(tier int, anchored, dni bool) bool {
-	if dni {
-		return tier == tierSocialLink
-	}
-	return anchored
-}
-
 // CollectSiteNumbers returns every distinct, valid phone-number candidate
 // found in doc — the UNION collectPhoneCandidates' DOM finders already
 // produce (social-link, tel:, microdata, og:/business meta), normalized and
@@ -125,11 +114,11 @@ func CollectSiteNumbers(doc *goquery.Document) []PhoneNumberFact {
 	if doc == nil {
 		return nil
 	}
-	var cands []phoneCandidate
-	cands = append(cands, socialLinkCandidates(doc)...)
-	cands = append(cands, telCandidates(doc)...)
-	cands = append(cands, microdataCandidates(doc)...)
-	cands = append(cands, ogPhoneCandidates(doc)...)
+	// The SAME candidate union collectPhoneCandidates builds for the
+	// single-winner resolver (contacts.go) — no `prior` seed, since a
+	// regex-fallback / prose-only phone is never a member of this DOM-only
+	// set (see the doc comment above).
+	cands := collectPhoneCandidates(doc)
 	if len(cands) == 0 {
 		return nil
 	}
@@ -141,35 +130,37 @@ func CollectSiteNumbers(doc *goquery.Document) []PhoneNumberFact {
 		tier int
 		key  string
 	}
-	byKey := make(map[string]int, len(cands)) // digit-key -> index into out
-	var out []keyed
+	tagged := make([]keyed, 0, len(cands))
 	for _, c := range cands {
-		key := reDigitsOnly.ReplaceAllString(c.value, "")
+		key := DigitsOnly(c.value)
 		if key == "" {
 			continue
 		}
 		anchored := numberIsAnchored(c.tier)
-		fact := PhoneNumberFact{
-			Value:       c.value,
-			Source:      numberSourceForTier(c.tier),
-			Anchored:    anchored,
-			DNI:         dni,
-			Trustworthy: numberIsTrustworthy(c.tier, anchored, dni),
-		}
-		if i, ok := byKey[key]; ok {
-			// Same number seen at another tier (e.g. a header tel: plus
-			// repeated itemprop=telephone duplicates for the same number):
-			// keep the HIGHER-tier reading — the strongest evidence found
-			// for this number wins its classification, mirroring
-			// pickPhoneCandidate's own tier-wins tiebreak.
-			if c.tier > out[i].tier {
-				out[i] = keyed{fact: fact, tier: c.tier, key: key}
-			}
-			continue
-		}
-		byKey[key] = len(out)
-		out = append(out, keyed{fact: fact, tier: c.tier, key: key})
+		tagged = append(tagged, keyed{
+			fact: PhoneNumberFact{
+				Value:       c.value,
+				Source:      numberSourceForTier(c.tier),
+				Anchored:    anchored,
+				DNI:         dni,
+				Trustworthy: dniTrustworthy(c.tier, dni),
+			},
+			tier: c.tier,
+			key:  key,
+		})
 	}
+
+	// Same number seen at another tier (e.g. a header tel: plus repeated
+	// itemprop=telephone duplicates for the same number): keep the
+	// HIGHER-tier reading — the strongest evidence found for this number
+	// wins its classification, mirroring pickPhoneCandidate's own
+	// tier-wins tiebreak. DedupeKeepStronger is the shared keyed-dedupe
+	// mechanism the enriche resolver's SiteNumbers accumulator (resolve.go)
+	// also uses, so both no longer hand-roll the identical map+scan logic.
+	out := DedupeKeepStronger(tagged,
+		func(k keyed) string { return k.key },
+		func(k keyed) int { return k.tier },
+	)
 
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].tier != out[j].tier {
@@ -183,6 +174,37 @@ func CollectSiteNumbers(doc *goquery.Document) []PhoneNumberFact {
 		facts[i] = k.fact
 	}
 	return facts
+}
+
+// DedupeKeepStronger merges items into a deduped slice keyed by keyFn: on a
+// duplicate key, the item with the HIGHER rankFn wins; first-seen order is
+// preserved (callers apply their own final sort on top). An empty key is
+// skipped — it means "could not classify", never a legitimate dedup target.
+//
+// Shared by CollectSiteNumbers (above) and the enriche resolver's
+// addSiteNumbers/siteNumbersSnapshot (resolve.go) — both need "same key,
+// keep the strongest reading" and previously hand-rolled the identical
+// map+linear-scan logic independently. Exported so the enriche package
+// (which already imports this one for PhoneNumberFact) can reuse it instead
+// of a second, drift-prone copy.
+func DedupeKeepStronger[T any](items []T, keyFn func(T) string, rankFn func(T) int) []T {
+	byKey := make(map[string]int, len(items))
+	out := make([]T, 0, len(items))
+	for _, it := range items {
+		key := keyFn(it)
+		if key == "" {
+			continue
+		}
+		if i, ok := byKey[key]; ok {
+			if rankFn(it) > rankFn(out[i]) {
+				out[i] = it
+			}
+			continue
+		}
+		byKey[key] = len(out)
+		out = append(out, it)
+	}
+	return out
 }
 
 // CollectSiteNumbersHTML parses html and returns CollectSiteNumbers(doc) — a

@@ -72,6 +72,37 @@ func TestExtractFacts_RegexFallbackSkipsBoilerplateJunk(t *testing.T) {
 	}
 }
 
+// TestExtractFacts_RegexFallbackPreservesFooterContact guards the FIX-2
+// over-strip regression: applyRegexFallback's junk-avoidance scope (see
+// stripNoiseHTML in goquery.go/facts.go) must NOT remove header/footer/nav/
+// aside/.widget content — those containers legitimately carry a RU-SMB
+// venue's plain-text address/phone (novoclinicspb.ru's real Tilda-built page
+// tags its phone number's own container with a literal "widget" class
+// token; see stripNoiseHTML's doc comment). Before the fix, applyRegexFallback
+// ran over ExtractGoquery's FULL boilerplate strip (removeSelectors, which
+// drops header/footer/nav/aside/.widget/.banner/[role=contentinfo]), so a
+// legit footer-only contact would have been silently lost.
+func TestExtractFacts_RegexFallbackPreservesFooterContact(t *testing.T) {
+	t.Parallel()
+	html := `<html><body>
+	<footer class="widget">
+	<p>Адрес: Литейный проспект, 55</p>
+	<p>Телефон: +7 (812) 999-88-77</p>
+	</footer>
+	</body></html>`
+
+	facts := ExtractFacts(html, "https://example.com")
+	if facts.Address == nil {
+		t.Error("expected address recovered from inside <footer> (must not be stripped)")
+	}
+	if facts.Phone == nil {
+		t.Fatal("expected phone recovered from inside <footer> (must not be stripped)")
+	}
+	if !contains(*facts.Phone, "999-88-77") {
+		t.Errorf("expected the footer phone, got %q", *facts.Phone)
+	}
+}
+
 func TestExtractFacts_JSONLDPriority(t *testing.T) {
 	t.Parallel()
 	html := `<html><head>

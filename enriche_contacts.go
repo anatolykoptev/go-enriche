@@ -76,6 +76,21 @@ func (e *Enricher) resolveContactsPage(ctx context.Context, item Item, result *R
 		contactsFacts.PhonePoisoned = true
 		contactsFacts.Phone = nil
 	}
+	// Accumulate the contacts page's full candidate phone-number SET (Phase
+	// P2, additive) into the resolver's SiteNumbers sidecar UNCONDITIONALLY,
+	// same as the homepage merge (enriche_fetch.go) — deliberately BEFORE the
+	// richness-gate early-return below. The richness gate governs only the
+	// single-winner Facts MERGE; the full-candidate-set sidecar is an
+	// orthogonal, read-only accumulator that must reflect EVERY page actually
+	// fetched+parsed, regardless of whether that page won the merge. A
+	// /contacts page fetched specifically because the homepage lacked an
+	// anchored phone member (see homepageMissingRichField) is exactly the
+	// page most likely to carry FEWER total facts than a richer homepage
+	// (hours+email+address) while still being the page the anchored phone
+	// lives on — gating this accumulation on richness would silently drop
+	// the feature's own headline case.
+	r.addSiteNumbers(extract.CollectSiteNumbersHTML(contactsHTML))
+
 	// Adopt the contacts page only when it is STRICTLY richer than the homepage
 	// in structured contact facts — a contacts page that surfaced nothing new
 	// must not re-merge (and a PhonePoisoned contacts page must still be able to
@@ -92,10 +107,6 @@ func (e *Enricher) resolveContactsPage(ctx context.Context, item Item, result *R
 	// equal-or-higher source, so the contacts-page value wins on conflict while
 	// poison-lock / operator-seed still outrank it.
 	r.mergeSite(contactsFacts)
-	// Accumulate the contacts page's full candidate phone-number SET (Phase
-	// P2, additive) into the resolver's SiteNumbers sidecar, same as the
-	// homepage merge (enriche_fetch.go).
-	r.addSiteNumbers(extract.CollectSiteNumbersHTML(contactsHTML))
 }
 
 // homepageMissingRichField reports whether the homepage lacks at least one of
