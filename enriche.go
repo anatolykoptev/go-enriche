@@ -18,6 +18,7 @@ import (
 	"github.com/anatolykoptev/go-enriche/fetch"
 	"github.com/anatolykoptev/go-enriche/maps"
 	"github.com/anatolykoptev/go-enriche/search"
+	"github.com/anatolykoptev/go-kit/httputil"
 )
 
 const (
@@ -44,7 +45,7 @@ type Enricher struct {
 	// targetGuard is the SSRF safety check run before a fetched URL is handed
 	// to an external render/extraction delegate this package does not control
 	// the outbound dial for (oxBrowser, browserFetch) — see checkTarget and
-	// WithTargetGuard. Defaults to fetch.CheckSSRFSafe in New().
+	// WithTargetGuard. Defaults to go-kit httputil.CheckRawURL in New().
 	targetGuard func(ctx context.Context, rawURL string) error
 }
 
@@ -53,7 +54,7 @@ type Enricher struct {
 // a future zero-value Enricher construction bypassing New().
 func (e *Enricher) checkTarget(ctx context.Context, rawURL string) error {
 	if e.targetGuard == nil {
-		return fmt.Errorf("%w: no target guard configured", fetch.ErrSSRFBlocked)
+		return fmt.Errorf("%w: no target guard configured", httputil.ErrSSRFBlocked)
 	}
 	return e.targetGuard(ctx, rawURL)
 }
@@ -74,7 +75,7 @@ func New(opts ...Option) *Enricher {
 		concurrency: defaultConcurrency,
 		cacheTTL:    defaultCacheTTL,
 		logger:      slog.New(discardHandler{}),
-		targetGuard: fetch.CheckSSRFSafe,
+		targetGuard: httputil.CheckRawURL,
 	}
 	for _, o := range opts {
 		o(e)
