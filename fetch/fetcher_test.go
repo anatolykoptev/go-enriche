@@ -12,7 +12,8 @@ import (
 )
 
 // newUnguardedFetcher builds a Fetcher whose client skips the default SSRF
-// guard (see ssrf.go / ssrf_test.go), for tests exercising fetcher behavior
+// guard (see go-kit httputil.NewSSRFGuardedClient, wired in NewFetcher /
+// fetcher.go, and ssrf_test.go), for tests exercising fetcher behavior
 // (redirects, timeouts, singleflight, body limits) against a local httptest
 // server — a legitimate loopback target in a test, but one the guarded
 // default correctly refuses. Uses the pre-existing WithClient escape hatch,
