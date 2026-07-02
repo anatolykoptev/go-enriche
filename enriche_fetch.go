@@ -223,7 +223,7 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 	// fetchContactsHTML's rawPoisoned in enriche_contacts.go (contacts-page
 	// mirror).
 	homeSiteNumbers := extract.CollectSiteNumbersHTML(siteHTML, homeRawPoisoned)
-	r.addSiteNumbers(homeSiteNumbers)
+	r.addSiteNumbers(homeSiteNumbers, item.City)
 
 	// Contacts-subpage discovery: the homepage often links a dedicated /contacts
 	// page that carries the canonical, richer contact set (email, hours, address)

@@ -52,6 +52,129 @@ func TestPhoneAreaCode(t *testing.T) {
 	}
 }
 
+// TestIsRUGeographicLandline is the seed-independent predicate's own
+// contract: it must recognize "some RU city's landline" purely from the
+// number's shape (11-digit, 7/8-prefixed, area code outside the
+// mobile/toll-free ranges), with NO dependency on cityAreaCodes — an
+// un-seeded city's code (Новосибирск 383) must still read as geographic.
+func TestIsRUGeographicLandline(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		phone string
+		want  bool
+	}{
+		{"spb seeded landline", "+7 (812) 956-18-40", true},
+		{"moscow seeded landline", "+7 (495) 123-45-67", true},
+		{"novosibirsk unseeded landline", "+7 (383) 123-45-67", true},
+		{"nizhny novgorod unseeded landline", "+7 (831) 123-45-67", true},
+		{"rostov unseeded landline", "+7 (863) 123-45-67", true},
+		{"mobile", "+7 (921) 000-11-22", false},
+		{"mobile low boundary 900", "+7 (900) 000-11-22", false},
+		{"mobile high boundary 999", "+7 (999) 000-11-22", false},
+		{"toll-free 8-800", "8 (800) 555-35-35", false},
+		{"unparseable garbage", "not a phone", false},
+		{"too short", "+7 812 12", false},
+	}
+	for _, tc := range cases {
+		if got := isRUGeographicLandline(tc.phone); got != tc.want {
+			t.Errorf("%s: isRUGeographicLandline(%q) = %v, want %v", tc.name, tc.phone, got, tc.want)
+		}
+	}
+}
+
+// TestClassifyCityMembership_NationalChain is the Эксимер-style headline
+// case: a national-chain site listing branches in several cities. Under
+// city=Санкт-Петербург, the 812 branch is CityMatch; every OTHER branch —
+// including 383/831/863, which are NOT in cityAreaCodes — must classify
+// CityForeign, proving foreign detection is seed-independent (it does not
+// require every possible city to be pre-seeded to correctly exclude it).
+func TestClassifyCityMembership_NationalChain(t *testing.T) {
+	t.Parallel()
+	spb := ExpectedAreaCodes("Санкт-Петербург")
+	cases := []struct {
+		name            string
+		phone           string
+		wantMatch       bool
+		wantForeign     bool
+		seededInCityMap bool
+	}{
+		{"812 spb branch — local match", "+7 (812) 111-11-11", true, false, true},
+		{"495 moscow branch — seeded foreign", "+7 (495) 222-22-22", false, true, true},
+		{"383 novosibirsk branch — UNSEEDED foreign", "+7 (383) 333-33-33", false, true, false},
+		{"831 nizhny novgorod branch — UNSEEDED foreign", "+7 (831) 444-44-44", false, true, false},
+		{"863 rostov branch — UNSEEDED foreign", "+7 (863) 555-55-55", false, true, false},
+	}
+	for _, tc := range cases {
+		gotMatch, gotForeign := ClassifyCityMembership(tc.phone, spb)
+		if gotMatch != tc.wantMatch || gotForeign != tc.wantForeign {
+			t.Errorf("%s: ClassifyCityMembership(%q, spb) = (match=%v, foreign=%v), want (match=%v, foreign=%v)",
+				tc.name, tc.phone, gotMatch, gotForeign, tc.wantMatch, tc.wantForeign)
+		}
+	}
+	// Sanity: the "unseeded" cases really are absent from cityAreaCodes —
+	// otherwise this test would not actually prove seed-independence.
+	for _, tc := range cases {
+		if tc.seededInCityMap {
+			continue
+		}
+		code := phoneAreaCode(tc.phone)
+		for _, seeded := range append(append([]int{}, cityAreaCodes["санкт-петербург"]...), cityAreaCodes["москва"]...) {
+			if code == seeded {
+				t.Fatalf("%s: test fixture bug — code %d IS seeded, cannot prove seed-independence", tc.name, code)
+			}
+		}
+	}
+}
+
+// TestClassifyCityMembership_MobileAndTollFree_Neutral: a legit mobile
+// number and an 8-800 line must NEVER be classified CityForeign — anti-fab
+// guard: a real mobile clinic line must not be silently excluded from an
+// authoritative pick just because it isn't the local area code.
+func TestClassifyCityMembership_MobileAndTollFree_Neutral(t *testing.T) {
+	t.Parallel()
+	spb := ExpectedAreaCodes("Санкт-Петербург")
+	cases := []struct {
+		name  string
+		phone string
+	}{
+		{"mobile", "+7 (921) 000-11-22"},
+		{"toll-free 8-800", "8 (800) 555-35-35"},
+	}
+	for _, tc := range cases {
+		match, foreign := ClassifyCityMembership(tc.phone, spb)
+		if match || foreign {
+			t.Errorf("%s: ClassifyCityMembership(%q, spb) = (match=%v, foreign=%v), want (false, false) — neutral, never foreign",
+				tc.name, tc.phone, match, foreign)
+		}
+	}
+}
+
+// TestClassifyCityMembership_EmptyCityCodes_Neutral: when the project has no
+// configured city (cityCodes empty — hully / non-RU / unset), EVERY
+// candidate — including a real geographic landline — must classify neutral
+// (false, false), so SiteNumbers output stays byte-identical to
+// pre-city-membership behavior for any project that never sets Item.City.
+func TestClassifyCityMembership_EmptyCityCodes_Neutral(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		phone string
+	}{
+		{"spb landline with no project city", "+7 (812) 111-11-11"},
+		{"moscow landline with no project city", "+7 (495) 222-22-22"},
+		{"unseeded landline with no project city", "+7 (383) 333-33-33"},
+		{"mobile with no project city", "+7 (921) 000-11-22"},
+	}
+	for _, tc := range cases {
+		match, foreign := ClassifyCityMembership(tc.phone, nil)
+		if match || foreign {
+			t.Errorf("%s: ClassifyCityMembership(%q, nil) = (match=%v, foreign=%v), want (false, false)",
+				tc.name, tc.phone, match, foreign)
+		}
+	}
+}
+
 func TestMatchesCity(t *testing.T) {
 	t.Parallel()
 	spb := expectedAreaCodes("Санкт-Петербург")

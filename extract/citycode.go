@@ -42,6 +42,14 @@ func expectedAreaCodes(city string) []int {
 	return nil
 }
 
+// ExpectedAreaCodes is the exported form of expectedAreaCodes, for callers
+// outside this package (the enriche resolver's SiteNumbers city-membership
+// tagging, resolve.go addSiteNumbers) that need the same city→area-codes
+// lookup without duplicating the numbering-plan map.
+func ExpectedAreaCodes(city string) []int {
+	return expectedAreaCodes(city)
+}
+
 // normalizeCityKey lowercases, trims, and strips a leading "г." / "г "
 // prefix so "г. Санкт-Петербург" matches "санкт-петербург".
 func normalizeCityKey(city string) string {
@@ -86,4 +94,68 @@ func areaCodeMatches(code int, expected []int) bool {
 // that have the string but not the precomputed code.
 func matchesCity(phone string, expected []int) bool {
 	return areaCodeMatches(phoneAreaCode(phone), expected)
+}
+
+// mobileCodeLow/mobileCodeHigh bound the RU mobile-operator area-code range
+// (900-999 — every 3-digit code whose first digit is 9). tollFreeCode is the
+// standard 8-800 toll-free/call-tracking prefix. Both are excluded from
+// "geographic landline" by isRUGeographicLandline: neither identifies a fixed
+// city, so neither can be city-matched OR city-foreign — see ClassifyCityMembership.
+const (
+	mobileCodeLow  = 900
+	mobileCodeHigh = 999
+	tollFreeCode   = 800
+)
+
+// isRUGeographicLandline reports whether phone is a well-formed RU number
+// (per phoneAreaCode's 11-digit 7/8-prefixed parse) whose area code
+// identifies a fixed geographic location — i.e. NOT a mobile-operator code
+// (900-999), NOT the 8-800 toll-free/call-tracking prefix, and NOT an
+// unparseable/non-RU string. This is the SEED-INDEPENDENT half of city
+// membership: it recognizes "this is some city's landline" WITHOUT the
+// city needing an entry in cityAreaCodes, so an un-seeded city's number
+// (Новосибирск 383, Ростов 863) still reads as geographic — see
+// ClassifyCityMembership's cityForeign, which uses this to exclude a
+// wrong-city landline from an authoritative pick even when that city was
+// never explicitly seeded.
+func isRUGeographicLandline(phone string) bool {
+	code := phoneAreaCode(phone)
+	if code < 0 {
+		return false
+	}
+	if code >= mobileCodeLow && code <= mobileCodeHigh {
+		return false
+	}
+	if code == tollFreeCode {
+		return false
+	}
+	return true
+}
+
+// ClassifyCityMembership tags a single phone candidate against the project's
+// city area codes (cityCodes — typically ExpectedAreaCodes(item.City)),
+// returning:
+//
+//   - cityMatch: the number's area code is one of cityCodes — a confirmed
+//     LOCAL number for the project's city.
+//   - cityForeign: the number is an RU geographic landline (per
+//     isRUGeographicLandline) whose area code is NOT one of cityCodes — a
+//     confirmed OTHER-city number that must never be treated as this
+//     project's authoritative contact, even for a city that was never
+//     seeded in cityAreaCodes (seed-independence).
+//
+// A mobile number, an 8-800 toll-free number, a non-RU/unparseable string,
+// or any number when cityCodes is empty (the project's city is unknown/
+// unset) classifies as NEITHER — cityMatch=false AND cityForeign=false
+// ("neutral"). The empty-cityCodes case is deliberate: a project with no
+// configured city (e.g. hully, non-RU) must tag every candidate neutral, so
+// its SiteNumbers output stays byte-identical to the pre-city-membership
+// behavior.
+func ClassifyCityMembership(phone string, cityCodes []int) (cityMatch, cityForeign bool) {
+	if len(cityCodes) == 0 {
+		return false, false
+	}
+	cityMatch = matchesCity(phone, cityCodes)
+	cityForeign = isRUGeographicLandline(phone) && !cityMatch
+	return cityMatch, cityForeign
 }
