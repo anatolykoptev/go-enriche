@@ -543,6 +543,59 @@ func TestEnrich_SiteNumbers_PoisonOR_RawDNISurvivesCleanRender(t *testing.T) {
 	}
 }
 
+// TestEnrich_PoisonOR_ZeroCandidateDNI_FactsPhoneSurvivesCleanRender is the
+// Facts.Phone twin of TestEnrich_SiteNumbers_PoisonOR_RawDNISurvivesCleanRender
+// above: a homepage whose RAW fetch runs a DNI vendor but carries ZERO phone
+// candidates forces a render (contactless raw); the RENDERED DOM omits the
+// vendor script and injects a tel: — the self-removing-widget case.
+//
+// Before this fix, the Facts.Phone carry-forward in enriche_fetch.go (the
+// "if rawFacts.PhonePoisoned && !renderedFacts.PhonePoisoned" guard) used
+// rawFacts.PhonePoisoned ALONE: resolvePhoneForCityDNI never even checks for
+// a DNI vendor when the raw page has zero phone candidates (it short-circuits
+// on the empty candidate set first), so rawFacts.PhonePoisoned stayed false
+// despite the Mango loader being present in the raw HTML — the injected
+// rendered tel: then surfaced as the authoritative, UNPOISONED Facts.Phone.
+// The fix ORs extract.HasDNIVendor(fr.HTML) into homeRawPoisoned and uses
+// THAT in the carry-forward, so the candidate fails closed regardless of
+// what the rendered DOM alone looks like — mirroring the SiteNumbers fix
+// from PR #27 (391833f) that this test's sibling above already guards.
+func TestEnrich_PoisonOR_ZeroCandidateDNI_FactsPhoneSurvivesCleanRender(t *testing.T) {
+	t.Parallel()
+	srv := newMultiPathServer(map[string]string{"/": dniRawShellZeroPhone})
+	defer srv.Close()
+
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		// Guard-B (checkTarget) defaults to the real httputil.CheckRawURL (go-kit), which
+		// refuses a loopback target — allow it here since contactsURL points at
+		// the local httptest server in these tests (see allowAllTargets).
+		WithTargetGuard(allowAllTargets),
+		WithMapsChecker(&mockMapsChecker{lat: 59.93, lon: 30.33}),
+		WithBrowserFetch(func(_ context.Context, _ string) (string, error) {
+			return dniCleanRenderedInjectsTel, nil
+		}),
+	)
+	result, err := e.Enrich(context.Background(), Item{
+		Name: "Клуб", URL: srv.URL + "/", City: "Санкт-Петербург", Mode: ModePlaces,
+	})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+
+	if result.Facts.Phone != nil {
+		t.Fatalf("Facts.Phone = %q, want nil (the injected rendered tel: is a rotating-proxy candidate from a raw DNI page with zero phone candidates — must not surface as authoritative)",
+			*result.Facts.Phone)
+	}
+	if !result.Facts.PhonePoisoned {
+		t.Errorf("Facts.PhonePoisoned = false, want true (zero-candidate raw DNI must still poison the rendered phone)")
+	}
+	if result.Provenance.Phone.Source != srcStrPoisonLocked {
+		t.Errorf("Provenance.Phone.Source = %q, want %q (poison-lock verdict, not a laundered clean phone)",
+			result.Provenance.Phone.Source, srcStrPoisonLocked)
+	}
+}
+
 // homeCleanPhoneLinksContacts is a homepage carrying a CLEAN city-local tel:
 // (official_site) but NO email/hours/address, linking a /contacts/ subpage. It
 // models the FIX-1 recall-regression case: the stable homepage phone must
