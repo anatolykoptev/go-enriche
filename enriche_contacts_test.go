@@ -145,6 +145,19 @@ func TestEnrich_ContactsPage_DNIOmitsPhoneKeepsEmailHours(t *testing.T) {
 	if result.Facts.Phone != nil {
 		t.Fatalf("Phone = %q, want nil (DNI contacts page, no social link → omit, and the maps proxy must not survive)", *result.Facts.Phone)
 	}
+	// PhonePoisoned must propagate onto the public Result so a consumer (e.g.
+	// wp_verify_contacts' omitted_dni verdict) can tell "DNI/call-tracking,
+	// trust as scraped" apart from "genuinely no phone found" — a bare nil
+	// Phone says nothing on its own. Before the dropPhone fix this was always
+	// false: the resolver dropped the phone but never set the flag.
+	if !result.Facts.PhonePoisoned {
+		t.Fatalf("PhonePoisoned = false, want true (DNI verdict must propagate onto Result.Facts, not just drop the phone silently)")
+	}
+	// The poison-lock verdict is itself resolved provenance, not an absent
+	// field — snapshot() must surface it even though Phone is nil.
+	if got := result.Provenance.Phone.Source; got != "poison_locked" {
+		t.Fatalf("Phone provenance source = %q, want poison_locked (the DNI verdict, not an empty/absent provenance)", got)
+	}
 	if result.Facts.Email == nil || *result.Facts.Email != "info@igora.ru" {
 		t.Fatalf("Email = %v, want info@igora.ru (email survives DNI)", derefOrNil(result.Facts.Email))
 	}
@@ -343,6 +356,12 @@ func TestEnrich_ContactsPageDNI_PreservesCleanHomepagePhone(t *testing.T) {
 	}
 	if got := result.Provenance.Phone.Source; got != "official_site" {
 		t.Fatalf("Phone provenance source = %q, want official_site (homepage phone, not poison-locked)", got)
+	}
+	// dropPhone's early-return guard must ALSO keep PhonePoisoned false: this
+	// call site refused to drop anything (a clean official-site phone already
+	// resolved), so it must not claim a poison verdict happened.
+	if result.Facts.PhonePoisoned {
+		t.Fatalf("PhonePoisoned = true, want false (dropPhone's early-return guard must not set the flag when it declines to drop the phone)")
 	}
 	// The contacts page still contributes its email/hours (DNI poisons only phone).
 	if result.Facts.Email == nil || *result.Facts.Email != "info@igora.ru" {
