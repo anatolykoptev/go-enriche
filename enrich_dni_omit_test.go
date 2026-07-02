@@ -69,9 +69,18 @@ func TestEnrich_DNISite_MapsPhone_Omitted(t *testing.T) {
 		t.Fatalf("DNI site + maps phone: phone must be OMITTED, got %q (provenance=%+v) — the rotating maps proxy survived the resolver",
 			*result.Facts.Phone, result.Provenance.Phone)
 	}
-	// Provenance for an omitted phone is empty (no value, no source on the wire).
-	if result.Provenance.Phone.Source != "" {
-		t.Errorf("omitted phone provenance source=%q want empty (phone is nil)", result.Provenance.Phone.Source)
+	// PhonePoisoned must propagate onto Result.Facts on the real production
+	// path (maps phone merged BEFORE the DNI-poisoned site fetch) too, not just
+	// the /contacts-page orchestration covered in enriche_contacts_test.go.
+	if !result.Facts.PhonePoisoned {
+		t.Errorf("PhonePoisoned = false, want true (DNI verdict must propagate even when a maps phone was merged first)")
+	}
+	// Provenance for an omitted phone carries the poison-lock verdict — it is a
+	// resolved refuse, not an absence, so it must NOT come back empty on the
+	// wire (was the pre-fix behaviour: dropPhone niled the phone but the
+	// resolver's snapshot() only serialized present values).
+	if result.Provenance.Phone.Source != srcStrPoisonLocked {
+		t.Errorf("omitted phone provenance source=%q want %q (poison-lock verdict, not an absent field)", result.Provenance.Phone.Source, srcStrPoisonLocked)
 	}
 }
 
