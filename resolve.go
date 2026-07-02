@@ -1,6 +1,8 @@
 package enriche
 
 import (
+	"sort"
+
 	"github.com/anatolykoptev/go-enriche/extract"
 	"github.com/anatolykoptev/go-enriche/fetch"
 	"github.com/anatolykoptev/go-enriche/maps"
@@ -124,6 +126,15 @@ type resolver struct {
 	facts *Facts
 	prov  *factProvenance
 	m     *Metrics
+
+	// siteNumbers is the additive (Phase P2) dedup-union of every candidate
+	// site-own phone number found across the official-site fetch — the
+	// homepage AND any discovered /contacts subpage. Populated via
+	// addSiteNumbers at both mergeSite call sites (enriche_fetch.go,
+	// enriche_contacts.go); exported read-only via siteNumbersSnapshot. It
+	// never feeds Facts.Phone or pickPhoneCandidate — purely a read-only
+	// sidecar for a consumer that wants the full SET, not the single winner.
+	siteNumbers []extract.PhoneNumberFact
 }
 
 // set merges one field value at the given source priority.
@@ -399,6 +410,93 @@ func (r *resolver) snapshot() Provenance {
 		Email:        conv(r.prov.email, r.facts.Email != nil),
 		Price:        conv(r.prov.price, r.facts.Price != nil),
 	}
+}
+
+// addSiteNumbers unions candidate site phone numbers collected from ONE
+// official-site page (the homepage or a discovered /contacts subpage) into
+// the resolver's accumulated SiteNumbers set, deduping by normalized digits
+// across repeated calls — the homepage and its /contacts subpage may print
+// the very same stable number. On a duplicate, the more-trustworthy/anchored
+// occurrence's classification wins: a weaker reading of the same digits (e.g.
+// a call-tracking-demoted homepage slot) must not shadow a Trustworthy
+// contacts-page reading of the identical number, and vice versa the strongest
+// evidence found for a number must not be lost to whichever page happened to
+// merge second.
+func (r *resolver) addSiteNumbers(nums []extract.PhoneNumberFact) {
+	for _, n := range nums {
+		key := phoneDigitKey(n.Value)
+		if key == "" {
+			continue
+		}
+		if i := siteNumberIndex(r.siteNumbers, key); i >= 0 {
+			if siteNumberRank(n) > siteNumberRank(r.siteNumbers[i]) {
+				r.siteNumbers[i] = n
+			}
+			continue
+		}
+		r.siteNumbers = append(r.siteNumbers, n)
+	}
+}
+
+// siteNumbersSnapshot returns the accumulated SiteNumbers set in a stable,
+// deterministic order (highest trust/anchor rank first, then ascending
+// digit-key) so a fixture yields byte-identical SiteNumbers across repeated
+// runs, independent of which mergeSite call site (homepage / contacts page)
+// produced each candidate. Returns nil when nothing was ever collected (the
+// zero-value, matching Provenance's own zero-value-stays-empty convention).
+func (r *resolver) siteNumbersSnapshot() []extract.PhoneNumberFact {
+	if len(r.siteNumbers) == 0 {
+		return nil
+	}
+	out := make([]extract.PhoneNumberFact, len(r.siteNumbers))
+	copy(out, r.siteNumbers)
+	sort.SliceStable(out, func(i, j int) bool {
+		ri, rj := siteNumberRank(out[i]), siteNumberRank(out[j])
+		if ri != rj {
+			return ri > rj
+		}
+		return phoneDigitKey(out[i].Value) < phoneDigitKey(out[j].Value)
+	})
+	return out
+}
+
+// siteNumberIndex returns the index of the first entry in nums whose
+// normalized digits equal key, or -1 when none matches.
+func siteNumberIndex(nums []extract.PhoneNumberFact, key string) int {
+	for i, n := range nums {
+		if phoneDigitKey(n.Value) == key {
+			return i
+		}
+	}
+	return -1
+}
+
+// siteNumberRank is the dedup tiebreak / sort key for a PhoneNumberFact:
+// Trustworthy outranks Anchored outranks neither. Deliberately coarser than
+// extract's internal phoneCandidate tier (PhoneNumberFact does not carry it) —
+// the resolver only needs "which reading is stronger", not the full ladder.
+func siteNumberRank(n extract.PhoneNumberFact) int {
+	rank := 0
+	if n.Anchored {
+		rank++
+	}
+	if n.Trustworthy {
+		rank += 2
+	}
+	return rank
+}
+
+// phoneDigitKey normalizes a phone display value to its bare digits for
+// dedup/sort purposes. A small local helper (not extract.reDigitsOnly, which
+// is unexported) — package enriche only ever needs this one normalization.
+func phoneDigitKey(v string) string {
+	digits := make([]byte, 0, len(v))
+	for i := 0; i < len(v); i++ {
+		if c := v[i]; c >= '0' && c <= '9' {
+			digits = append(digits, c)
+		}
+	}
+	return string(digits)
 }
 
 // derefStr returns the pointee or "" for a nil *string.

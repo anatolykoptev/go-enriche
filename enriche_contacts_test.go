@@ -475,9 +475,27 @@ func TestEnrich_ContactsPagePoisonOR_RawDNISurvivesCleanRender(t *testing.T) {
 }
 
 // homeCompleteContacts is a homepage that already carries email + hours +
-// address (all the RICH fields a /contacts page would supply) AND links a
-// /contacts/ page. The FIX-3 perf gate must SKIP discovery: nothing to gain.
+// address + an ANCHORED (contacts-region) phone — all the RICH fields a
+// /contacts page would supply — AND links a /contacts/ page. The FIX-3 perf
+// gate (widened in P2 to also require an anchored phone member — see
+// homepageMissingRichField) must SKIP discovery: nothing to gain.
 const homeCompleteContacts = `<!DOCTYPE html><html lang="ru"><head><title>Кафе</title></head>
+<body><article><h1>О кафе</h1>
+<p>Уютное кафе в центре города. Мы готовим вкусные блюда из свежих продуктов
+каждый день и рады гостям с самого утра до позднего вечера. Большой выбор
+напитков, десертов и сезонное меню. Приходите всей семьёй — у нас уютно.</p>
+<a href="mailto:hello@cafe.ru">hello@cafe.ru</a>
+<address>Невский проспект, 28</address>
+<div class="contacts"><a href="tel:+78120000001">+7 (812) 000-00-01</a></div>
+<div><span>Часы работы</span><span>Пн-Вс 10:00-22:00</span></div>
+<nav><a href="/contacts/">Контакты</a></nav>
+</article></body></html>`
+
+// homeCompleteNoAnchoredPhone is homeCompleteContacts WITHOUT any phone at
+// all: complete on hours/email/address (the pre-P2 gate), but carrying ZERO
+// anchored phone member. The P2-widened FIX-3 gate must NOT skip discovery
+// for this homepage — see TestEnrich_ContactsPageGate_NoAnchoredPhoneStillFetches.
+const homeCompleteNoAnchoredPhone = `<!DOCTYPE html><html lang="ru"><head><title>Кафе</title></head>
 <body><article><h1>О кафе</h1>
 <p>Уютное кафе в центре города. Мы готовим вкусные блюда из свежих продуктов
 каждый день и рады гостям с самого утра до позднего вечера. Большой выбор
@@ -528,6 +546,63 @@ func TestEnrich_ContactsPageGate_CompleteHomepageSkipsFetch(t *testing.T) {
 	}
 	if discovered != 0 {
 		t.Fatalf("OnContactsPageDiscovered = %d, want 0 (complete homepage must skip the contacts fetch)", discovered)
+	}
+}
+
+// TestEnrich_ContactsPageGate_NoAnchoredPhoneStillFetches is the P2 golden:
+// a homepage that is "complete" under the PRE-P2 gate (hours+email+address
+// all present) but carries ZERO anchored phone member must still fetch
+// /contacts — a phone-only-on-/contacts venue must not be silently skipped
+// just because the OTHER rich fields happen to already be on the homepage.
+// The contacts-page number must surface both in Facts.Phone and in the
+// additive Result.SiteNumbers set.
+func TestEnrich_ContactsPageGate_NoAnchoredPhoneStillFetches(t *testing.T) {
+	t.Parallel()
+	srv := newMultiPathServer(map[string]string{
+		"/":          homeCompleteNoAnchoredPhone,
+		"/contacts/": contactsPageRich, // carries the +7 (812) 439-11-00 anchored tel:
+	})
+	defer srv.Close()
+
+	var discovered, resolved int
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		// Guard-B (checkTarget) defaults to the real httputil.CheckRawURL (go-kit), which
+		// refuses a loopback target — allow it here since contactsURL points at
+		// the local httptest server in these tests (see allowAllTargets).
+		WithTargetGuard(allowAllTargets),
+		WithMapsChecker(&mockMapsChecker{lat: 59.93, lon: 30.33}),
+		WithMetrics(&Metrics{
+			OnContactsPageDiscovered: func() { discovered++ },
+			OnContactsPageResolved:   func() { resolved++ },
+		}),
+	)
+	result, err := e.Enrich(context.Background(), Item{
+		Name: "Кафе", URL: srv.URL + "/", City: "Санкт-Петербург", Mode: ModePlaces,
+	})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+	if discovered != 1 {
+		t.Fatalf("OnContactsPageDiscovered = %d, want 1 (a homepage with zero anchored phone member must still fetch /contacts)", discovered)
+	}
+	if resolved != 1 {
+		t.Fatalf("OnContactsPageResolved = %d, want 1", resolved)
+	}
+	if result.Facts.Phone == nil || !strings.Contains(*result.Facts.Phone, "439-11-00") {
+		t.Fatalf("Phone = %v, want the contacts-page 812 phone", derefOrNil(result.Facts.Phone))
+	}
+	found := false
+	for _, n := range result.SiteNumbers {
+		if strings.Contains(n.Value, "439-11-00") {
+			found = true
+			if !n.Anchored || !n.Trustworthy {
+				t.Errorf("SiteNumbers entry for 439-11-00 = %+v, want Anchored=true Trustworthy=true", n)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("SiteNumbers missing the contacts-page 439-11-00 candidate; got %+v", result.SiteNumbers)
 	}
 }
 

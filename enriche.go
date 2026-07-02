@@ -166,6 +166,13 @@ func (e *Enricher) Enrich(ctx context.Context, item Item) (*Result, error) {
 	// values on re-enrich (Phase 3 ONE_WAY contract).
 	result.Provenance = r.snapshot()
 
+	// Export the accumulated candidate phone-number SET (Phase P2, additive):
+	// every distinct valid site-own number found across the homepage and any
+	// discovered /contacts subpage, each tagged Anchored/DNI/Trustworthy by
+	// the same fail-closed gate that picks Facts.Phone — see
+	// extract.PhoneNumberFact. Never overrides Facts.Phone/pickPhoneCandidate.
+	result.SiteNumbers = r.siteNumbersSnapshot()
+
 	// Phone-source telemetry: report the winning phone's provenance once.
 	if item.Mode == ModePlaces {
 		e.metrics.phoneSource(r.phoneSource())
