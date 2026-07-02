@@ -55,8 +55,11 @@ func TestPhoneAreaCode(t *testing.T) {
 // TestIsRUGeographicLandline is the seed-independent predicate's own
 // contract: it must recognize "some RU city's landline" purely from the
 // number's shape (11-digit, 7/8-prefixed, area code outside the
-// mobile/toll-free ranges), with NO dependency on cityAreaCodes — an
-// un-seeded city's code (Новосибирск 383) must still read as geographic.
+// mobile/toll-free/non-geographic-service ranges), with NO dependency on
+// cityAreaCodes — an un-seeded city's code (Новосибирск 383) must still
+// read as geographic, while a non-geographic 80x service code (804
+// shared-cost, 809 premium — inside the SAME {800,816} bracket 812
+// belongs to) must NOT.
 func TestIsRUGeographicLandline(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -73,6 +76,8 @@ func TestIsRUGeographicLandline(t *testing.T) {
 		{"mobile low boundary 900", "+7 (900) 000-11-22", false},
 		{"mobile high boundary 999", "+7 (999) 000-11-22", false},
 		{"toll-free 8-800", "8 (800) 555-35-35", false},
+		{"80x non-geographic service code 804 (shared-cost)", "+7 (804) 111-22-33", false},
+		{"80x non-geographic service code 809 (premium)", "+7 (809) 111-22-33", false},
 		{"unparseable garbage", "not a phone", false},
 		{"too short", "+7 812 12", false},
 	}
@@ -128,9 +133,12 @@ func TestClassifyCityMembership_NationalChain(t *testing.T) {
 }
 
 // TestClassifyCityMembership_MobileAndTollFree_Neutral: a legit mobile
-// number and an 8-800 line must NEVER be classified CityForeign — anti-fab
-// guard: a real mobile clinic line must not be silently excluded from an
-// authoritative pick just because it isn't the local area code.
+// number, an 8-800 line, and a non-geographic 80x service code (804
+// shared-cost / 809 premium — inside the SAME {800,816} bracket 812
+// belongs to) must NEVER be classified CityForeign — anti-fab guard: a
+// real mobile clinic line, or a legit non-geographic service number, must
+// not be silently excluded from an authoritative pick just because it
+// isn't the local area code.
 func TestClassifyCityMembership_MobileAndTollFree_Neutral(t *testing.T) {
 	t.Parallel()
 	spb := ExpectedAreaCodes("Санкт-Петербург")
@@ -140,6 +148,8 @@ func TestClassifyCityMembership_MobileAndTollFree_Neutral(t *testing.T) {
 	}{
 		{"mobile", "+7 (921) 000-11-22"},
 		{"toll-free 8-800", "8 (800) 555-35-35"},
+		{"80x non-geographic service code 804 (shared-cost)", "+7 (804) 111-22-33"},
+		{"80x non-geographic service code 809 (premium)", "+7 (809) 111-22-33"},
 	}
 	for _, tc := range cases {
 		match, foreign := ClassifyCityMembership(tc.phone, spb)

@@ -116,3 +116,48 @@ func TestEnrich_SiteNumbers_CityMembership_EmptyCity_Neutral(t *testing.T) {
 		}
 	}
 }
+
+// TestEnrich_SiteNumbers_CityMembership_SurvivesDedup locks addSiteNumbers'
+// own doc-comment invariant end-to-end (resolve.go): the SAME phone number
+// is tagged at TWO different tiers across two addSiteNumbers calls — a
+// weak, unanchored homepage body tel: (homeWeakPhoneLinksContacts) then a
+// stronger, anchored+Trustworthy /contacts-page reading of the IDENTICAL
+// digits (contactsPageStrongSamePhone, both defined in
+// enriche_contacts_test.go and reused here for the exact same fixture
+// TestEnrich_SiteNumbersSnapshot_HigherRankReadingWins already exercises
+// for Anchored/Trustworthy). DedupeKeepStronger keeps the stronger
+// occurrence; its CityMatch tag — computed on EACH occurrence before the
+// merge, since ClassifyCityMembership is a pure function of the digits —
+// must survive intact on the winner, not silently reset to the
+// merge-losing occurrence's (zero-value) tag or dropped.
+func TestEnrich_SiteNumbers_CityMembership_SurvivesDedup(t *testing.T) {
+	t.Parallel()
+	srv := newMultiPathServer(map[string]string{
+		"/":          homeWeakPhoneLinksContacts,
+		"/contacts/": contactsPageStrongSamePhone,
+	})
+	defer srv.Close()
+
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		// Guard-B (checkTarget) defaults to the real httputil.CheckRawURL (go-kit), which
+		// refuses a loopback target — allow it here since contactsURL points at
+		// the local httptest server in these tests (see allowAllTargets).
+		WithTargetGuard(allowAllTargets),
+		WithMapsChecker(&mockMapsChecker{lat: 59.93, lon: 30.33}),
+	)
+	result, err := e.Enrich(context.Background(), Item{
+		Name: "Студия", URL: srv.URL + "/", City: "Санкт-Петербург", Mode: ModePlaces,
+	})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+
+	n := siteNumberByValue(t, result.SiteNumbers, "000-11-22")
+	if !n.Anchored || !n.Trustworthy {
+		t.Fatalf("SiteNumbers entry for 000-11-22 = %+v, want the STRONGER contacts-page reading (Anchored=true Trustworthy=true) to survive the dedup", n)
+	}
+	if !n.CityMatch || n.CityForeign {
+		t.Errorf("SiteNumbers entry for 000-11-22 = %+v, want CityMatch=true CityForeign=false to survive on the dedup winner (812 is local to Санкт-Петербург)", n)
+	}
+}
