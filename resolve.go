@@ -40,7 +40,7 @@ const (
 	srcStrMaps             = "maps"
 	srcStrSearch           = "search"
 	srcStrUnknown          = "unknown"
-	srcStrPoisonLocked     = "poison_locked" // DNI omit — never serialized (phone is nil)
+	srcStrPoisonLocked     = "poison_locked" // DNI omit — phone is nil, but this source still reaches Provenance.Phone (see snapshot)
 )
 
 func (s fieldSource) String() string {
@@ -49,8 +49,9 @@ func (s fieldSource) String() string {
 		return srcStrOperatorVerified
 	case sourcePoisonLock:
 		// Internal "refuse" verdict for a DNI-poisoned phone. The field is dropped
-		// to nil, so this string is never serialized (snapshot only emits sources
-		// for present fields); mapped here only for completeness/telemetry.
+		// to nil, but the verdict itself is a meaningful signal — snapshot treats
+		// sourcePoisonLock as present so Result.Provenance.Phone.Source still
+		// reaches consumers (see snapshot() and Facts.PhonePoisoned).
 		return srcStrPoisonLocked
 	case sourceOfficialSite:
 		return srcStrOfficialSite
@@ -223,10 +224,16 @@ func (r *resolver) setPreferLonger(dst **string, owner *fieldProv, val string, s
 // The drive-igora case (homepage IS the DNI site, no clean phone anywhere) is
 // unaffected: at the homepage merge the phone is still owned by maps/search/none
 // (< official_site), so the drop+lock fires as before.
+//
+// Sets Facts.PhonePoisoned so the verdict propagates onto the public Result —
+// without it, a poison-dropped phone (Phone=nil) is indistinguishable from a
+// genuinely absent one, and consumers (e.g. wp_verify_contacts) can't tell
+// "DNI/call-tracking, trust as scraped" from "no phone found".
 func (r *resolver) dropPhone() {
 	if r.prov.phone.source >= sourceOfficialSite {
 		// An operator pin or an already-resolved clean official-site phone wins
-		// over a (later) DNI verdict — leave it untouched.
+		// over a (later) DNI verdict — leave it untouched, and leave PhonePoisoned
+		// false: this call site did NOT actually drop anything.
 		return
 	}
 	// Count a conflict when a real lower-priority phone is being refused, so the
@@ -235,6 +242,7 @@ func (r *resolver) dropPhone() {
 		r.m.conflict("phone")
 	}
 	r.facts.Phone = nil
+	r.facts.PhonePoisoned = true
 	r.prov.phone.source = sourcePoisonLock
 	r.prov.phone.conf = confLow
 }
@@ -367,6 +375,12 @@ func (r *resolver) phoneSource() string {
 // snapshot exports the resolved per-field provenance onto the public,
 // persistable Provenance struct. Only fields that resolved to a value carry a
 // non-empty source; an absent field stays zero-valued (omitempty on the wire).
+//
+// Phone is the one exception to "value present": a poison-locked phone is nil
+// (dropPhone refused it) but sourcePoisonLock is itself the resolved verdict,
+// not an absence — so it is treated as present here too, letting
+// Result.Provenance.Phone.Source == "poison_locked" reach consumers alongside
+// Facts.PhonePoisoned.
 func (r *resolver) snapshot() Provenance {
 	conv := func(p fieldProv, present bool) FieldProvenance {
 		if !present || p.source == sourceNone {
@@ -374,11 +388,12 @@ func (r *resolver) snapshot() Provenance {
 		}
 		return FieldProvenance{Source: p.source.String(), Confidence: string(p.conf)}
 	}
+	phonePresent := r.facts.Phone != nil || r.prov.phone.source == sourcePoisonLock
 	return Provenance{
 		PlaceName:    conv(r.prov.placeName, r.facts.PlaceName != nil),
 		Address:      conv(r.prov.address, r.facts.Address != nil),
 		LegalAddress: conv(r.prov.legalAddress, r.facts.LegalAddress != nil),
-		Phone:        conv(r.prov.phone, r.facts.Phone != nil),
+		Phone:        conv(r.prov.phone, phonePresent),
 		Website:      conv(r.prov.website, r.facts.Website != nil),
 		Hours:        conv(r.prov.hours, r.facts.Hours != nil),
 		Email:        conv(r.prov.email, r.facts.Email != nil),
