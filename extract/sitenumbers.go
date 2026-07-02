@@ -54,6 +54,23 @@ type PhoneNumberFact struct {
 	// vendor failing OPEN (a rotating proxy marked Trustworthy) where the
 	// resolver fails closed.
 	Trustworthy bool
+	// CityMatch is true when this candidate's area code is local to the
+	// project's configured city (Item.City, tagged via
+	// ClassifyCityMembership in the enriche resolver's addSiteNumbers — see
+	// resolve.go). Additive and NOT computed by CollectSiteNumbers/
+	// CollectSiteNumbersHTML themselves (they have no city input); both this
+	// and CityForeign default to false (page-city-neutral) for any caller
+	// that builds a PhoneNumberFact directly or enriches with no known city.
+	CityMatch bool
+	// CityForeign is true when this candidate is a confirmed OTHER-city RU
+	// geographic landline — i.e. NOT city-local, NOT a mobile number, NOT an
+	// 8-800 toll-free number, and NOT unparseable/non-RU (see
+	// isRUGeographicLandline in citycode.go). Seed-independent: a landline
+	// for a city that was never added to cityAreaCodes still tags
+	// CityForeign=true here, so a national-chain site's out-of-town branch
+	// number is never mistaken for a neutral/safe candidate. CityMatch and
+	// CityForeign are never both true.
+	CityForeign bool
 }
 
 // Site-number source labels (PhoneNumberFact.Source). The tierContacts label
