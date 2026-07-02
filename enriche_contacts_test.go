@@ -464,6 +464,85 @@ func TestEnrich_PoisonOR_RawDNISurvivesCleanRender(t *testing.T) {
 	}
 }
 
+// dniRawShellZeroPhone models a homepage whose RAW HTML runs a Mango DNI
+// widget and carries ZERO phone at all (no tel:, no social link) —
+// contactless, which forces the render (hasContactFacts is false, same gate
+// as dniRawShell above). Because there is no phone candidate on the raw
+// page, resolvePhoneForCityDNI never even reaches its DNI check (it
+// short-circuits on an empty candidate set), so rawFacts.PhonePoisoned
+// alone would be false despite the vendor being active — exactly the gap
+// homeRawPoisoned (enriche_fetch.go) closes via extract.HasDNIVendor.
+const dniRawShellZeroPhone = `<!DOCTYPE html><html lang="ru"><head><title>Клуб</title>
+<script src="https://widgets.mango-office.ru/widgets/mango.js"></script>
+<script>var MangoObject="mango-office";</script></head>
+<body><div id="app"></div></body></html>`
+
+// dniCleanRenderedInjectsTel models the SELF-REMOVING-WIDGET case the
+// Poison-OR mechanism exists to defeat: the RENDERED DOM OMITS the DNI
+// script entirely (the widget rewrote/removed itself at runtime) and shows
+// a plausible tel: in the contacts region — exactly what a rotating proxy
+// looks like once the vendor loader is gone from the post-render markup.
+const dniCleanRenderedInjectsTel = `<!DOCTYPE html><html lang="ru"><head><title>Клуб</title></head>
+<body><article><p>Клуб приглашает гостей каждый день. У нас просторные залы,
+внимательный персонал и удобное расположение в самом центре города рядом с метро.
+Приходите целыми семьями — мы рады каждому посетителю и всегда готовы помочь.</p></article>
+<div class="contacts">
+<a href="tel:+78137938615">+7 (813) 793-86-15</a></div></body></html>`
+
+// TestEnrich_SiteNumbers_PoisonOR_RawDNISurvivesCleanRender is the Critical
+// regression guard (pr-review-council re-review of PR #27, commit 8709dae):
+// a homepage whose RAW fetch runs a DNI vendor but has NO phone at all
+// forces a render (contactless raw). The RENDERED DOM omits the vendor
+// script and injects a tel: — the exact self-removing-widget case the
+// Facts.Phone Poison-OR (enriche_fetch.go:165) already defeats. Before this
+// fix, CollectSiteNumbersHTML re-ran detectDNIVendor independently on ONLY
+// the rendered HTML, saw no vendor, and marked the injected (rotating-proxy)
+// tel: Trustworthy=true in the exported, cache-persisted Result.SiteNumbers
+// — laundering it past the same anti-fab guarantee Facts.Phone already
+// enforces. The fix ORs the raw-fetch poison signal (homeRawPoisoned) into
+// the page-level DNI the Trustworthy gate uses, so the candidate fails
+// closed regardless of what the rendered DOM looks like.
+func TestEnrich_SiteNumbers_PoisonOR_RawDNISurvivesCleanRender(t *testing.T) {
+	t.Parallel()
+	srv := newMultiPathServer(map[string]string{"/": dniRawShellZeroPhone})
+	defer srv.Close()
+
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		// Guard-B (checkTarget) defaults to the real httputil.CheckRawURL (go-kit), which
+		// refuses a loopback target — allow it here since contactsURL points at
+		// the local httptest server in these tests (see allowAllTargets).
+		WithTargetGuard(allowAllTargets),
+		WithMapsChecker(&mockMapsChecker{lat: 59.93, lon: 30.33}),
+		WithBrowserFetch(func(_ context.Context, _ string) (string, error) {
+			return dniCleanRenderedInjectsTel, nil
+		}),
+	)
+	result, err := e.Enrich(context.Background(), Item{
+		Name: "Клуб", URL: srv.URL + "/", City: "Санкт-Петербург", Mode: ModePlaces,
+	})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+
+	found := false
+	for _, n := range result.SiteNumbers {
+		if !strings.Contains(n.Value, "793-86-15") {
+			continue
+		}
+		found = true
+		if !n.DNI {
+			t.Errorf("SiteNumbers entry for 793-86-15 DNI = false, want true (the raw-fetch poison verdict must survive the clean render)")
+		}
+		if n.Trustworthy {
+			t.Errorf("SiteNumbers entry for 793-86-15 Trustworthy = true, want false (pre-fix bug: an injected rotating-proxy tel: laundered as trustworthy because the RENDERED DOM alone looked clean)")
+		}
+	}
+	if !found {
+		t.Fatalf("SiteNumbers missing the rendered 793-86-15 candidate; got %+v", result.SiteNumbers)
+	}
+}
+
 // homeCleanPhoneLinksContacts is a homepage carrying a CLEAN city-local tel:
 // (official_site) but NO email/hours/address, linking a /contacts/ subpage. It
 // models the FIX-1 recall-regression case: the stable homepage phone must

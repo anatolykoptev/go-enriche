@@ -40,9 +40,7 @@ const contentSelectors = "article, main, .content, .post-content, .article-conte
 // main-content extraction below — NOT by applyRegexFallback (extract/facts.go),
 // which needs the much narrower stripNoise (see its doc comment for why).
 func stripBoilerplate(doc *goquery.Document) {
-	doc.Find(removeSelectors).Each(func(_ int, s *goquery.Selection) {
-		s.Remove()
-	})
+	removeElements(doc, removeSelectors)
 }
 
 // removeNoiseSelectors are non-textual elements that can never legitimately
@@ -67,7 +65,16 @@ var removeNoiseSelectors = strings.Join([]string{
 // applyRegexFallback's junk-avoidance needs, as opposed to stripBoilerplate's
 // full main-content strip.
 func stripNoise(doc *goquery.Document) {
-	doc.Find(removeNoiseSelectors).Each(func(_ int, s *goquery.Selection) {
+	removeElements(doc, removeNoiseSelectors)
+}
+
+// removeElements removes every element doc matches against the given CSS
+// selector list, in place. Shared control flow for stripBoilerplate and
+// stripNoise — they differ ONLY by which selector list governs the strip;
+// both named entry points (and their distinct selector consts) stay so
+// callers keep a semantically clear name for which scope they want.
+func removeElements(doc *goquery.Document, selectors string) {
+	doc.Find(selectors).Each(func(_ int, s *goquery.Selection) {
 		s.Remove()
 	})
 }

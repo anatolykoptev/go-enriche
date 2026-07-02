@@ -199,7 +199,22 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 	// Accumulate the homepage's full candidate phone-number SET (Phase P2,
 	// additive) into the resolver's SiteNumbers sidecar — the SAME page
 	// (siteHTML) whose facts siteFacts just merged, so tags stay consistent.
-	homeSiteNumbers := extract.CollectSiteNumbersHTML(siteHTML)
+	// homeRawPoisoned carries the Poison-OR forward into the sidecar (mirrors
+	// the "rawFacts.PhonePoisoned && !renderedFacts.PhonePoisoned" carry-
+	// forward above, and fetchContactsHTML's rawPoisoned in
+	// enriche_contacts.go): when the RAW homepage ran a DNI widget that
+	// rewrote/removed itself before siteHTML (a render) was captured, the
+	// candidate set must still fail closed. rawFacts.PhonePoisoned ALONE is
+	// not enough here: resolvePhoneForCityDNI never even checks for a DNI
+	// vendor when the raw page has ZERO phone candidates to poison (it
+	// short-circuits before that check), so a raw homepage that carries a
+	// DNI script but no phone at all — exactly the case that forces the
+	// render below — would leave PhonePoisoned false despite the vendor
+	// being active. extract.HasDNIVendor checks vendor presence directly,
+	// independent of candidate count, closing that gap — see
+	// CollectSiteNumbersHTML's pagePoisoned doc comment.
+	homeRawPoisoned := rawFacts.PhonePoisoned || extract.HasDNIVendor(fr.HTML)
+	homeSiteNumbers := extract.CollectSiteNumbersHTML(siteHTML, homeRawPoisoned)
 	r.addSiteNumbers(homeSiteNumbers)
 
 	// Contacts-subpage discovery: the homepage often links a dedicated /contacts

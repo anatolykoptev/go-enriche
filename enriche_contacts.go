@@ -88,8 +88,13 @@ func (e *Enricher) resolveContactsPage(ctx context.Context, item Item, result *R
 	// page most likely to carry FEWER total facts than a richer homepage
 	// (hours+email+address) while still being the page the anchored phone
 	// lives on — gating this accumulation on richness would silently drop
-	// the feature's own headline case.
-	r.addSiteNumbers(extract.CollectSiteNumbersHTML(contactsHTML))
+	// the feature's own headline case. rawPoisoned carries the Poison-OR
+	// forward into the sidecar (mirrors the rawPoisoned carry-forward onto
+	// contactsFacts.PhonePoisoned above): a /contacts page whose RAW fetch
+	// ran a DNI widget that rewrote/removed itself before contactsHTML (a
+	// render) was captured must still fail closed — see
+	// CollectSiteNumbersHTML's pagePoisoned doc comment.
+	r.addSiteNumbers(extract.CollectSiteNumbersHTML(contactsHTML, rawPoisoned))
 
 	// Adopt the contacts page only when it is STRICTLY richer than the homepage
 	// in structured contact facts — a contacts page that surfaced nothing new

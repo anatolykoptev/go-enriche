@@ -36,12 +36,13 @@ type PhoneNumberFact struct {
 	// so a prose-only candidate is excluded by construction, not by a
 	// separate plausibility gate (YAGNI).
 	Anchored bool
-	// DNI is true when the PAGE (not just this candidate) actively runs a
-	// known dynamic-number-insertion / call-tracking vendor
-	// (detectDNIVendor). It is a page-level signal, deliberately the SAME
-	// for every candidate a single CollectSiteNumbers call returns — see
-	// Trustworthy for why a per-candidate DNI matcher must not be
-	// introduced.
+	// DNI is true when the PAGE (not just this candidate) is considered
+	// DNI/call-tracking-active — the OR of doc's own detectDNIVendor()
+	// reading AND the caller-supplied pagePoisoned flag (CollectSiteNumbers'
+	// Poison-OR: see its doc comment). It is a page-level signal,
+	// deliberately the SAME for every candidate a single CollectSiteNumbers
+	// call returns — see Trustworthy for why a per-candidate DNI matcher
+	// must not be introduced.
 	DNI bool
 	// Trustworthy is the COMMITTED verdict, computed via dniTrustworthy
 	// (contacts.go) — the SAME shared predicate resolvePhoneForCityDNI's own
@@ -103,6 +104,20 @@ func numberIsAnchored(tier int) bool {
 // pure DOM read, so a regex-fallback / prose-only phone is never a member of
 // the returned set.
 //
+// pagePoisoned carries the RAW-fetch poison verdict forward across a render —
+// the SAME Poison-OR invariant Facts.Phone honors (see enriche_fetch.go's
+// "rawFacts.PhonePoisoned && !renderedFacts.PhonePoisoned" and
+// enriche_contacts.go's rawPoisoned carry-forward). A DNI/call-tracking
+// widget can rewrite or remove itself at runtime, so a clean-looking
+// POST-RENDER doc says nothing about whether the RAW page was poisoned. When
+// doc is the RENDERED dom and pagePoisoned is true, it is OR'd into doc's own
+// detectDNIVendor() reading before dniTrustworthy is evaluated — so a
+// raw-poisoned page can never launder a rotating-proxy tel: into
+// Trustworthy=true (in the exported, cache-persisted Result.SiteNumbers)
+// just because the widget hid itself before the render was captured. Pass
+// false when there is no separate raw-fetch stage to carry forward (e.g. a
+// standalone doc with no prior fetch).
+//
 // Ordering is deterministic: highest tier first, then ascending normalized
 // digits, so a fixture yields byte-identical output across repeated runs
 // regardless of DOM traversal order.
@@ -110,7 +125,7 @@ func numberIsAnchored(tier int) bool {
 // pickPhoneCandidate (the single-winner resolver) and Facts.Phone are
 // UNCHANGED by this function — it is an additive, read-only view over the
 // same candidate set collectPhoneCandidates already builds.
-func CollectSiteNumbers(doc *goquery.Document) []PhoneNumberFact {
+func CollectSiteNumbers(doc *goquery.Document, pagePoisoned bool) []PhoneNumberFact {
 	if doc == nil {
 		return nil
 	}
@@ -123,7 +138,8 @@ func CollectSiteNumbers(doc *goquery.Document) []PhoneNumberFact {
 		return nil
 	}
 
-	_, dni := detectDNIVendor(doc)
+	_, domDNI := detectDNIVendor(doc)
+	dni := domDNI || pagePoisoned
 
 	type keyed struct {
 		fact PhoneNumberFact
@@ -207,17 +223,19 @@ func DedupeKeepStronger[T any](items []T, keyFn func(T) string, rankFn func(T) i
 	return out
 }
 
-// CollectSiteNumbersHTML parses html and returns CollectSiteNumbers(doc) — a
-// convenience entry point for callers that hold raw HTML rather than an
-// already-parsed document (the enriche resolver's SiteNumbers accumulator,
-// which calls this at BOTH the homepage and /contacts-subpage mergeSite call
-// sites). Mirrors the documentFromHTML + doc-based-helper split every other
+// CollectSiteNumbersHTML parses html and returns CollectSiteNumbers(doc,
+// pagePoisoned) — a convenience entry point for callers that hold raw HTML
+// rather than an already-parsed document (the enriche resolver's
+// SiteNumbers accumulator, which calls this at BOTH the homepage and
+// /contacts-subpage mergeSite call sites, passing that page's raw-fetch
+// poison verdict — see CollectSiteNumbers' pagePoisoned doc comment).
+// Mirrors the documentFromHTML + doc-based-helper split every other
 // exported HTML-string entry point in this package already uses (see
 // ExtractSiteContacts). Returns nil for empty/unparsable HTML.
-func CollectSiteNumbersHTML(html string) []PhoneNumberFact {
+func CollectSiteNumbersHTML(html string, pagePoisoned bool) []PhoneNumberFact {
 	doc, err := documentFromHTML(html)
 	if err != nil || doc == nil {
 		return nil
 	}
-	return CollectSiteNumbers(doc)
+	return CollectSiteNumbers(doc, pagePoisoned)
 }

@@ -41,7 +41,7 @@ func findByValueSubstring(nums []PhoneNumberFact, sub string) *PhoneNumberFact {
 func TestCollectSiteNumbers_Eksimer_SocialLinkTrustworthyDespiteCalltouch(t *testing.T) {
 	t.Parallel()
 	doc := docFromFixture(t, "eksimer.html")
-	nums := CollectSiteNumbers(doc)
+	nums := CollectSiteNumbers(doc, false)
 
 	if got := findByValueSubstring(nums, "5611362"); got != nil {
 		t.Fatalf("SiteNumbers must never contain the maps-card number 561-13-62 (not on the site's own page): got %+v", *got)
@@ -87,7 +87,7 @@ func TestCollectSiteNumbers_Eksimer_SocialLinkTrustworthyDespiteCalltouch(t *tes
 func TestCollectSiteNumbers_Lazermed_AnchoredTelTrustworthyNoDNI(t *testing.T) {
 	t.Parallel()
 	doc := docFromFixture(t, "lazermed.html")
-	nums := CollectSiteNumbers(doc)
+	nums := CollectSiteNumbers(doc, false)
 
 	tel := findByValueSubstring(nums, "571-46-12")
 	if tel == nil {
@@ -125,7 +125,7 @@ func TestCollectSiteNumbers_Lazermed_AnchoredTelTrustworthyNoDNI(t *testing.T) {
 func TestCollectSiteNumbers_DedupesRepeatedMicrodataKeepsHighestTier(t *testing.T) {
 	t.Parallel()
 	doc := docFromFixture(t, "royal-wed.html")
-	nums := CollectSiteNumbers(doc)
+	nums := CollectSiteNumbers(doc, false)
 
 	if len(nums) != 2 {
 		t.Fatalf("len(SiteNumbers) = %d, want 2 (deduped: one 812 number + one WhatsApp number), got %+v", len(nums), nums)
@@ -147,9 +147,9 @@ func TestCollectSiteNumbers_Deterministic(t *testing.T) {
 	t.Parallel()
 	doc := docFromFixture(t, "royal-wed.html")
 
-	first := CollectSiteNumbers(doc)
+	first := CollectSiteNumbers(doc, false)
 	for i := 0; i < 5; i++ {
-		got := CollectSiteNumbers(doc)
+		got := CollectSiteNumbers(doc, false)
 		if len(got) != len(first) {
 			t.Fatalf("run %d: len = %d, want %d", i, len(got), len(first))
 		}
@@ -164,8 +164,8 @@ func TestCollectSiteNumbers_Deterministic(t *testing.T) {
 // TestCollectSiteNumbers_NilDoc guards the nil-safety contract.
 func TestCollectSiteNumbers_NilDoc(t *testing.T) {
 	t.Parallel()
-	if got := CollectSiteNumbers(nil); got != nil {
-		t.Errorf("CollectSiteNumbers(nil) = %+v, want nil", got)
+	if got := CollectSiteNumbers(nil, false); got != nil {
+		t.Errorf("CollectSiteNumbers(nil, false) = %+v, want nil", got)
 	}
 }
 
@@ -173,7 +173,7 @@ func TestCollectSiteNumbers_NilDoc(t *testing.T) {
 // empty-input contract (mirrors ExtractSiteContacts/documentFromHTML).
 func TestCollectSiteNumbersHTML_EmptyInput(t *testing.T) {
 	t.Parallel()
-	if got := CollectSiteNumbersHTML(""); got != nil {
+	if got := CollectSiteNumbersHTML("", false); got != nil {
 		t.Errorf("CollectSiteNumbersHTML(\"\") = %+v, want nil", got)
 	}
 }

@@ -278,7 +278,7 @@ func TestDNITrustworthy_AgreesBetweenResolverAndSiteNumbers(t *testing.T) {
 				t.Fatalf("parse: %v", err)
 			}
 
-			nums := CollectSiteNumbers(doc)
+			nums := CollectSiteNumbers(doc, false) // no separate raw-fetch stage in this fixture
 			if len(nums) != 1 {
 				t.Fatalf("len(SiteNumbers) = %d, want exactly 1 candidate on this fixture; got %+v", len(nums), nums)
 			}
