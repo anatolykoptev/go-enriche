@@ -35,6 +35,17 @@ var removeSelectors = strings.Join([]string{
 // contentSelectors are tried in order to find the main content element.
 const contentSelectors = "article, main, .content, .post-content, .article-content, #content"
 
+// stripBoilerplate removes non-content HTML elements (script/style/nav/ads/...
+// — see removeSelectors) from doc in place. Shared by ExtractGoquery's content
+// extraction below and by applyRegexFallback's junk-avoidance scoping
+// (extract/facts.go) — a CSS/script decimal must never surface as a
+// regex-matched "phone" (the Novoclinic bug).
+func stripBoilerplate(doc *goquery.Document) {
+	doc.Find(removeSelectors).Each(func(_ int, s *goquery.Selection) {
+		s.Remove()
+	})
+}
+
 // ExtractGoquery uses goquery CSS selectors to extract main content.
 // Returns content in the requested format and the page title.
 func ExtractGoquery(rawHTML string, format Format) (content string, title string) {
@@ -54,9 +65,7 @@ func ExtractGoquery(rawHTML string, format Format) (content string, title string
 	}
 
 	// Remove boilerplate elements.
-	doc.Find(removeSelectors).Each(func(_ int, s *goquery.Selection) {
-		s.Remove()
-	})
+	stripBoilerplate(doc)
 
 	// Find main content container.
 	contentSel := doc.Find(contentSelectors).First()

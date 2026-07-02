@@ -44,6 +44,34 @@ func TestExtractFacts_RegexFallback(t *testing.T) {
 	}
 }
 
+// TestExtractFacts_RegexFallbackSkipsBoilerplateJunk guards the Novoclinic bug
+// (novoclinicspb.ru, REAL capture 2026-07-02): applyRegexFallback used to run
+// regexPhone over RAW HTML, so a CSS letter-spacing decimal inside a <style>
+// block ("letter-spacing: 0.06153846153846154em") read as the digit run
+// 84615384615 — which ValidatePhone accepts (area code 461 falls in the
+// Rossvyaz 401-499 landline range) — and won the page's ONLY phone slot
+// (structured data, tel: hrefs and microdata are all absent on this fixture,
+// so the venue's real phone is reachable only via the Layer-2 regex pass).
+// The fallback must scope to boilerplate-stripped text (style/script/...
+// removed — see stripBoilerplate in goquery.go) so the CSS junk never
+// surfaces, while the real visible phone is still recovered.
+func TestExtractFacts_RegexFallbackSkipsBoilerplateJunk(t *testing.T) {
+	t.Parallel()
+	html := readFixture(t, "novoclinic.html")
+
+	facts := ExtractFacts(html, "https://novoclinicspb.ru")
+
+	if facts.Phone == nil {
+		t.Fatal("expected the real site phone to be recovered, got nil")
+	}
+	if *facts.Phone == "84615384615" {
+		t.Errorf("CSS-decimal junk phone leaked through: %q", *facts.Phone)
+	}
+	if !contains(*facts.Phone, "331-52-55") {
+		t.Errorf("expected the real site phone (+7 (921) 331-52-55), got %q", *facts.Phone)
+	}
+}
+
 func TestExtractFacts_JSONLDPriority(t *testing.T) {
 	t.Parallel()
 	html := `<html><head>

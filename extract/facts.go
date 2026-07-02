@@ -3,6 +3,7 @@ package extract
 import (
 	"strings"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/anatolykoptev/go-enriche/structured"
 )
 
@@ -75,8 +76,12 @@ func ExtractFactsForCity(html, pageURL, city string) Facts {
 		applyOrgFacts(data, html, &facts)
 	}
 
-	// Layer 2: regex fallback — only fills nil fields.
-	applyRegexFallback(html, &facts)
+	// Layer 2: regex fallback — only fills nil fields. Scoped to
+	// boilerplate-stripped HTML (script/style/noscript/... removed — see
+	// stripBoilerplate) rather than raw html, so a CSS/script decimal can
+	// never surface as a junk "phone" (the Novoclinic bug — see
+	// applyRegexFallback / stripBoilerplateHTML).
+	applyRegexFallback(stripBoilerplateHTML(html), &facts)
 
 	// Layer 3: official-site contact override — a contacts-region tel: href is
 	// authoritative and overrides whatever Layer 1/2 produced; a body tel:
@@ -333,6 +338,28 @@ func orgAddressIsLegal(org *structured.Organization, html string, facts *Facts) 
 		}
 	}
 	return false
+}
+
+// stripBoilerplateHTML parses html, removes boilerplate elements (script/
+// style/noscript/nav/ads/... — see stripBoilerplate in goquery.go), and
+// re-serializes the result back to HTML. applyRegexFallback below scans this
+// instead of the raw page so a CSS/script decimal (e.g. a letter-spacing
+// value like "0.06153846153846154em") can no longer read as a digit-shaped
+// junk phone/address/price — the root cause of the Novoclinic false phone
+// (84615384615, which even ValidatePhone accepted). Falls back to the raw
+// html on a parse error, so a malformed page still gets scanned rather than
+// silently dropped.
+func stripBoilerplateHTML(html string) string {
+	doc, err := documentFromHTML(html)
+	if err != nil || doc == nil {
+		return html
+	}
+	stripBoilerplate(doc)
+	stripped, err := goquery.OuterHtml(doc.Selection)
+	if err != nil {
+		return html
+	}
+	return stripped
 }
 
 func applyRegexFallback(html string, facts *Facts) {
