@@ -94,7 +94,7 @@ func (e *Enricher) resolveContactsPage(ctx context.Context, item Item, result *R
 	// ran a DNI widget that rewrote/removed itself before contactsHTML (a
 	// render) was captured must still fail closed — see
 	// CollectSiteNumbersHTML's pagePoisoned doc comment.
-	r.addSiteNumbers(extract.CollectSiteNumbersHTML(contactsHTML, rawPoisoned))
+	r.addSiteNumbers(extract.CollectSiteNumbersHTML(contactsHTML, rawPoisoned), item.City)
 
 	// Adopt the contacts page only when it is STRICTLY richer than the homepage
 	// in structured contact facts — a contacts page that surfaced nothing new

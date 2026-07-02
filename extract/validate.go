@@ -61,14 +61,73 @@ func ValidatePrice(price string) bool {
 	return true
 }
 
+// mobileCodeLow/mobileCodeHigh bound the RU mobile-operator ("Mobile DEF")
+// 3-digit area-code range — Rossvyaz's {900,999} allocation. Named here
+// (not just inlined into validCodeRanges below) so validCodeRanges'
+// "Mobile DEF" row and isMobileCode share the EXACT same bounds instead of
+// two independently hand-typed {900,999} literals that could drift apart.
+const (
+	mobileCodeLow  = 900
+	mobileCodeHigh = 999
+)
+
 // validCodeRanges defines valid Russian area/operator code ranges (Rossvyaz).
 var validCodeRanges = [][2]int{
-	{301, 349}, // Landline
-	{351, 395}, // Landline
-	{401, 499}, // Landline
-	{800, 816}, // SPb/Leningrad
-	{820, 879}, // Northern regions
-	{900, 999}, // Mobile DEF
+	{301, 349},                      // Landline
+	{351, 395},                      // Landline
+	{401, 499},                      // Landline
+	{800, 816},                      // SPb/Leningrad
+	{820, 879},                      // Northern regions
+	{mobileCodeLow, mobileCodeHigh}, // Mobile DEF
+}
+
+// isMobileCode reports whether code falls in the RU mobile-operator range
+// (mobileCodeLow-mobileCodeHigh) — exposed as its own predicate for a
+// caller (e.g. citycode.go's isRUGeographicLandline) that needs "is this
+// SPECIFICALLY mobile", not just "is this any valid RU code"
+// (isValidAreaCode). Reuses the SAME bounds validCodeRanges' "Mobile DEF"
+// row encodes — one source of truth, not a second hand-typed range.
+func isMobileCode(code int) bool {
+	return code >= mobileCodeLow && code <= mobileCodeHigh
+}
+
+// nonGeoServiceAreaCodes are the RU DEF non-geographic "service" 3-digit
+// area codes that sit INSIDE the {800,816} validCodeRanges bracket without
+// identifying a fixed city — Rossvyaz's shared-cost/universal-access/
+// premium allocation (803, 805-809; 804 shared-cost). The bracket's
+// remaining codes — notably 812 (Saint Petersburg) — are real ABC
+// geographic codes and are correctly NOT listed here. The plain 8-800
+// toll-free code is intentionally NOT repeated here: it already has its
+// own named predicate, isTollFree (contacts.go) — see isGeographicAreaCode
+// below, which checks both.
+var nonGeoServiceAreaCodes = map[int]bool{
+	803: true,
+	804: true,
+	805: true,
+	806: true,
+	807: true,
+	808: true,
+	809: true,
+}
+
+// isNonGeoServiceCode reports whether code is one of the RU DEF
+// non-geographic "service" codes in nonGeoServiceAreaCodes. The single
+// source of truth a caller needing the FULL 80x non-geographic exclusion
+// (isGeographicAreaCode below; citycode.go's isRUGeographicLandline)
+// reuses instead of hand-rolling a second 80x list.
+func isNonGeoServiceCode(code int) bool {
+	return nonGeoServiceAreaCodes[code]
+}
+
+// isGeographicAreaCode reports whether code is a valid RU area code
+// (isValidAreaCode) that identifies a FIXED CITY — i.e. neither a
+// mobile-operator code (isMobileCode) nor a non-geographic DEF service
+// code (the plain toll-free 800 via isTollFree, or the broader 803-809
+// service block via isNonGeoServiceCode). The composed predicate
+// citycode.go's isRUGeographicLandline reuses instead of re-deriving its
+// own exclusion list from scratch.
+func isGeographicAreaCode(code int) bool {
+	return isValidAreaCode(code) && !isMobileCode(code) && !isTollFree(code) && !isNonGeoServiceCode(code)
 }
 
 // ValidatePhone checks if a phone number is a valid Russian number

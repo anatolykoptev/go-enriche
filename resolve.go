@@ -422,9 +422,24 @@ func (r *resolver) snapshot() Provenance {
 // contacts-page reading of the identical number, and vice versa the strongest
 // evidence found for a number must not be lost to whichever page happened to
 // merge second.
-func (r *resolver) addSiteNumbers(nums []extract.PhoneNumberFact) {
+//
+// city is the project's configured city (Item.City, passed by both call
+// sites — enriche_fetch.go and enriche_contacts.go). Each incoming candidate
+// is tagged with extract.ClassifyCityMembership before merging, so
+// CityMatch/CityForeign travel with the SAME candidate whichever occurrence
+// DedupeKeepStronger keeps; an empty city (unknown/unset project city, e.g.
+// hully) yields extract.ExpectedAreaCodes("")==nil, which
+// ClassifyCityMembership tags neutral (false, false) — byte-identical to
+// pre-city-membership behavior.
+func (r *resolver) addSiteNumbers(nums []extract.PhoneNumberFact, city string) {
 	if len(nums) == 0 {
 		return
+	}
+	cityCodes := extract.ExpectedAreaCodes(city)
+	tagged := make([]extract.PhoneNumberFact, len(nums))
+	for i, n := range nums {
+		n.CityMatch, n.CityForeign = extract.ClassifyCityMembership(n.Value, cityCodes)
+		tagged[i] = n
 	}
 	// extract.DedupeKeepStronger is the SAME keyed-dedupe-keep-strongest
 	// mechanism CollectSiteNumbers (extract/sitenumbers.go) uses — merging
@@ -433,7 +448,7 @@ func (r *resolver) addSiteNumbers(nums []extract.PhoneNumberFact) {
 	// strongest reading" rule, so the two no longer hand-roll independent
 	// copies of it.
 	r.siteNumbers = extract.DedupeKeepStronger(
-		append(r.siteNumbers, nums...),
+		append(r.siteNumbers, tagged...),
 		func(n extract.PhoneNumberFact) string { return extract.DigitsOnly(n.Value) },
 		siteNumberRank,
 	)
