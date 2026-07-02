@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"golang.org/x/sync/singleflight"
+
+	"github.com/anatolykoptev/go-kit/httputil"
 )
 
 // Default configuration values.
@@ -47,17 +49,16 @@ func WithTimeout(d time.Duration) Option {
 }
 
 // NewFetcher creates a Fetcher with the given options. The default client is
-// SSRF-guarded (see ssrf.go): it refuses to connect to loopback, private,
-// link-local, unspecified, or multicast addresses, since rawURL passed to
-// Fetch is caller-supplied by design (e.g. an advertiser-provided website
-// field) and must never be able to reach internal infrastructure. Pass
-// WithClient to opt out (e.g. for a test hitting a local httptest server).
+// SSRF-guarded via go-kit httputil.NewSSRFGuardedClient (the single,
+// framework-owned SSRF block-list): it refuses to connect to loopback,
+// private, link-local, unspecified, multicast, CGNAT, NAT64, 6to4, or
+// IPv4-compatible-IPv6 addresses, since rawURL passed to Fetch is
+// caller-supplied by design (e.g. an advertiser-provided website field) and
+// must never be able to reach internal infrastructure. Pass WithClient to
+// opt out (e.g. for a test hitting a local httptest server).
 func NewFetcher(opts ...Option) *Fetcher {
 	f := &Fetcher{
-		client: &http.Client{
-			Timeout:   DefaultTimeout,
-			Transport: guardedTransport(),
-		},
+		client:       httputil.NewSSRFGuardedClient(&http.Client{Timeout: DefaultTimeout}),
 		maxBodyBytes: DefaultMaxBodyBytes,
 	}
 	for _, o := range opts {
@@ -104,7 +105,7 @@ func (f *Fetcher) doFetch(ctx context.Context, rawURL string) (*FetchResult, err
 		return &FetchResult{Status: StatusUnreachable}, nil
 	}
 
-	resp, err := client.Do(req) //nolint:gosec // URL is user-provided by design; guarded against internal targets by NewFetcher's default transport (see ssrf.go)
+	resp, err := client.Do(req) //nolint:gosec // URL is user-provided by design; guarded against internal targets by NewFetcher's default transport (see go-kit httputil.NewSSRFGuardedClient)
 	if err != nil {
 		return &FetchResult{Status: StatusUnreachable}, nil
 	}

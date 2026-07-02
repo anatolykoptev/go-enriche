@@ -11,6 +11,7 @@ import (
 	"github.com/anatolykoptev/go-enriche/fetch"
 	"github.com/anatolykoptev/go-enriche/maps"
 	"github.com/anatolykoptev/go-enriche/search"
+	"github.com/anatolykoptev/go-kit/httputil"
 )
 
 // Option configures an Enricher.
@@ -27,14 +28,14 @@ func WithFetcher(f *fetch.Fetcher) Option {
 // otherwise silently bypass NewFetcher's default SSRF guard — a real escape
 // hatch, since a stealth client is this org's production HTTP pattern
 // (go-stealth/go-wowa) and the caller-supplied URL it fetches is exactly the
-// untrusted input the guard exists for. fetch.GuardClient composes the guard
-// into c's Transport instead (connect-time DialContext wrap for a plain
-// *http.Transport, or a request-level pre-check wrap for an opaque
-// RoundTripper such as go-stealth's fingerprinting client) without touching
-// c's TLS/JA3/proxy/middleware configuration.
+// untrusted input the guard exists for. httputil.NewSSRFGuardedClient
+// composes the guard into c's Transport instead (connect-time DialContext
+// wrap for a plain *http.Transport, or a request-level pre-check wrap for an
+// opaque RoundTripper such as go-stealth's fingerprinting client) without
+// touching c's TLS/JA3/proxy/middleware configuration.
 func WithStealth(c *http.Client) Option {
 	return func(e *Enricher) {
-		e.fetcher = fetch.NewFetcher(fetch.WithClient(fetch.GuardClient(c)))
+		e.fetcher = fetch.NewFetcher(fetch.WithClient(httputil.NewSSRFGuardedClient(c)))
 	}
 }
 
@@ -128,10 +129,11 @@ func WithOxBrowser(baseURL string) Option {
 // WithTargetGuard overrides the SSRF safety check run on a URL before it is
 // handed to an external render/extraction delegate (oxBrowser, browserFetch)
 // — a hop this package does not control the outbound dial for, so
-// fetch.Fetcher's own guarded transport (see fetch/ssrf.go) cannot protect
-// it. Defaults to fetch.CheckSSRFSafe, which refuses loopback, private
-// (RFC1918/RFC4193), link-local (including the 169.254.169.254 cloud-metadata
-// address), unspecified, and multicast targets.
+// fetch.Fetcher's own guarded transport cannot protect it. Defaults to
+// go-kit httputil.CheckRawURL, the single, framework-owned SSRF check, which
+// refuses loopback, private (RFC1918/RFC4193), link-local (including the
+// 169.254.169.254 cloud-metadata address), unspecified, multicast, CGNAT,
+// NAT64, 6to4, IPv4-compatible-IPv6, and non-http(s)-scheme targets.
 //
 // Production callers should not override this — it exists so tests can point
 // oxBrowser/browserFetch at a local httptest server. Passing a nil fn is a

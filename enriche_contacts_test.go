@@ -62,7 +62,7 @@ func TestEnrich_ContactsPage_SurfacesEmailHoursHomepageLacks(t *testing.T) {
 	var discovered, resolved int
 	e := newTestEnricher(
 		WithFetcher(testFetcher()),
-		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// Guard-B (checkTarget) defaults to the real httputil.CheckRawURL (go-kit), which
 		// refuses a loopback target — allow it here since contactsURL points at
 		// the local httptest server in these tests (see allowAllTargets).
 		WithTargetGuard(allowAllTargets),
@@ -130,7 +130,7 @@ func TestEnrich_ContactsPage_DNIOmitsPhoneKeepsEmailHours(t *testing.T) {
 
 	e := newTestEnricher(
 		WithFetcher(testFetcher()),
-		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// Guard-B (checkTarget) defaults to the real httputil.CheckRawURL (go-kit), which
 		// refuses a loopback target — allow it here since contactsURL points at
 		// the local httptest server in these tests (see allowAllTargets).
 		WithTargetGuard(allowAllTargets),
@@ -183,7 +183,7 @@ func TestEnrich_ContactsPage_RenderErrorShellDegradesToRaw(t *testing.T) {
 	var renderErrors int
 	e := newTestEnricher(
 		WithFetcher(testFetcher()),
-		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// Guard-B (checkTarget) defaults to the real httputil.CheckRawURL (go-kit), which
 		// refuses a loopback target — allow it here since contactsURL points at
 		// the local httptest server in these tests (see allowAllTargets).
 		WithTargetGuard(allowAllTargets),
@@ -224,7 +224,7 @@ func TestEnrich_ContactsPage_NoDiscoveryWhenNoLink(t *testing.T) {
 	var discovered int
 	e := newTestEnricher(
 		WithFetcher(testFetcher()),
-		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// Guard-B (checkTarget) defaults to the real httputil.CheckRawURL (go-kit), which
 		// refuses a loopback target — allow it here since contactsURL points at
 		// the local httptest server in these tests (see allowAllTargets).
 		WithTargetGuard(allowAllTargets),
@@ -285,7 +285,7 @@ func TestEnrich_PoisonOR_RawDNISurvivesCleanRender(t *testing.T) {
 
 	e := newTestEnricher(
 		WithFetcher(testFetcher()),
-		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// Guard-B (checkTarget) defaults to the real httputil.CheckRawURL (go-kit), which
 		// refuses a loopback target — allow it here since contactsURL points at
 		// the local httptest server in these tests (see allowAllTargets).
 		WithTargetGuard(allowAllTargets),
@@ -337,7 +337,7 @@ func TestEnrich_ContactsPageDNI_PreservesCleanHomepagePhone(t *testing.T) {
 
 	e := newTestEnricher(
 		WithFetcher(testFetcher()),
-		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// Guard-B (checkTarget) defaults to the real httputil.CheckRawURL (go-kit), which
 		// refuses a loopback target — allow it here since contactsURL points at
 		// the local httptest server in these tests (see allowAllTargets).
 		WithTargetGuard(allowAllTargets),
@@ -389,7 +389,7 @@ func TestEnrich_HomepageIsDNI_NoCleanPhoneAnywhere_StillOmits(t *testing.T) {
 
 	e := newTestEnricher(
 		WithFetcher(testFetcher()),
-		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// Guard-B (checkTarget) defaults to the real httputil.CheckRawURL (go-kit), which
 		// refuses a loopback target — allow it here since contactsURL points at
 		// the local httptest server in these tests (see allowAllTargets).
 		WithTargetGuard(allowAllTargets),
@@ -443,7 +443,7 @@ func TestEnrich_ContactsPagePoisonOR_RawDNISurvivesCleanRender(t *testing.T) {
 
 	e := newTestEnricher(
 		WithFetcher(testFetcher()),
-		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// Guard-B (checkTarget) defaults to the real httputil.CheckRawURL (go-kit), which
 		// refuses a loopback target — allow it here since contactsURL points at
 		// the local httptest server in these tests (see allowAllTargets).
 		WithTargetGuard(allowAllTargets),
@@ -514,7 +514,7 @@ func TestEnrich_ContactsPageGate_CompleteHomepageSkipsFetch(t *testing.T) {
 	var discovered int
 	e := newTestEnricher(
 		WithFetcher(testFetcher()),
-		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// Guard-B (checkTarget) defaults to the real httputil.CheckRawURL (go-kit), which
 		// refuses a loopback target — allow it here since contactsURL points at
 		// the local httptest server in these tests (see allowAllTargets).
 		WithTargetGuard(allowAllTargets),
@@ -545,7 +545,7 @@ func TestEnrich_ContactsPageGate_PhoneOnlyHomepageStillFetches(t *testing.T) {
 	var discovered, resolved int
 	e := newTestEnricher(
 		WithFetcher(testFetcher()),
-		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// Guard-B (checkTarget) defaults to the real httputil.CheckRawURL (go-kit), which
 		// refuses a loopback target — allow it here since contactsURL points at
 		// the local httptest server in these tests (see allowAllTargets).
 		WithTargetGuard(allowAllTargets),
@@ -591,7 +591,7 @@ func TestEnrich_ContactsPage_EqualSourceOverwrite(t *testing.T) {
 
 	e := newTestEnricher(
 		WithFetcher(testFetcher()),
-		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// Guard-B (checkTarget) defaults to the real httputil.CheckRawURL (go-kit), which
 		// refuses a loopback target — allow it here since contactsURL points at
 		// the local httptest server in these tests (see allowAllTargets).
 		WithTargetGuard(allowAllTargets),
@@ -638,7 +638,7 @@ func TestEnrich_ContactsPage_LongerAddressWinsEqualSource(t *testing.T) {
 
 	e := newTestEnricher(
 		WithFetcher(testFetcher()),
-		// Guard-B (checkTarget) defaults to the real fetch.CheckSSRFSafe, which
+		// Guard-B (checkTarget) defaults to the real httputil.CheckRawURL (go-kit), which
 		// refuses a loopback target — allow it here since contactsURL points at
 		// the local httptest server in these tests (see allowAllTargets).
 		WithTargetGuard(allowAllTargets),

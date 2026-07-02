@@ -54,7 +54,8 @@ func newTestServer(html string, statusCode int) *httptest.Server {
 }
 
 // testFetcher builds a fetch.Fetcher whose client skips the default SSRF
-// guard (fetch/ssrf.go), for tests that point item.URL at a local
+// guard (go-kit httputil.NewSSRFGuardedClient, wired in fetch.NewFetcher),
+// for tests that point item.URL at a local
 // httptest.Server (loopback) — a legitimate target in a test, but one the
 // guarded default correctly refuses. Uses the pre-existing WithClient escape
 // hatch, same as any other caller opting out of the default guard. Shared
@@ -66,7 +67,7 @@ func testFetcher() *fetch.Fetcher {
 // allowAllTargets is a permissive Enricher.targetGuard override (see
 // WithTargetGuard) for tests that drive the oxBrowser/browserFetch render
 // delegates against a local httptest.Server. The REAL default guard
-// (fetch.CheckSSRFSafe) would refuse a loopback target, same reasoning as
+// (httputil.CheckRawURL, go-kit) would refuse a loopback target, same reasoning as
 // testFetcher — this is the render-delegate-gate analogue of that escape
 // hatch, not a production code path.
 func allowAllTargets(context.Context, string) error { return nil }
@@ -74,7 +75,7 @@ func allowAllTargets(context.Context, string) error { return nil }
 // newTestEnricher builds an Enricher defaulted for tests that point item.URL
 // (or a discovered contacts/search-source URL) at a local httptest.Server:
 // the SSRF guard — both fetch.Fetcher default transport and the
-// Enricher-level targetGuard (see fetch/ssrf.go, options.go) — correctly
+// Enricher-level targetGuard (see go-kit httputil, options.go) — correctly
 // refuses a loopback target, so every such test needs an explicit opt-out.
 // Caller opts are applied AFTER these defaults, so a test can still override
 // either (e.g. to exercise the real guard, pass New() directly instead).

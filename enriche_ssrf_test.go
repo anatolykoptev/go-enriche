@@ -17,7 +17,8 @@ import (
 // fetch.Fetcher's dial-time guard cannot protect — see checkTarget in
 // enriche.go. Unlike every other test in this package, they deliberately do
 // NOT use testFetcher()/newTestEnricher()/allowAllTargets: the REAL default
-// guards (fetch.NewFetcher() and fetch.CheckSSRFSafe, both wired by New())
+// guards (fetch.NewFetcher(), built on go-kit httputil.NewSSRFGuardedClient, and
+// httputil.CheckRawURL, both wired by New())
 // are exactly what's under test here.
 //
 // The complete render-delegate call-site set (verified by grepping every
@@ -33,7 +34,7 @@ import (
 // (enriche_fetch.go): the ox-browser leg fires in a goroutine BEFORE the raw
 // fetch's own guard has a chance to short-circuit the function, so it needs
 // its own checkTarget gate. item.URL is an address the default guard must
-// refuse (see fetch/ssrf.go's isBlockedIP); the fake ox-browser server must
+// refuse (see go-kit httputil.IsBlockedIP); the fake ox-browser server must
 // never see a request.
 func TestFetchAndExtract_OxBrowser_BlocksInternalItemURL(t *testing.T) {
 	t.Parallel()
@@ -130,7 +131,7 @@ func TestFetchContactsHTML_BlocksInternalRenderTarget(t *testing.T) {
 // Uses WithFetcher(testFetcher()) (deliberately unguarded, simulating
 // WithStealth/any custom fetcher) WITHOUT newTestEnricher() (which would
 // also set WithTargetGuard(allowAllTargets) and mask the bug): the REAL
-// default targetGuard (fetch.CheckSSRFSafe) is exactly what's under test.
+// default targetGuard (httputil.CheckRawURL, go-kit) is exactly what's under test.
 func TestEnrich_HomepageRender_BlocksInternalTarget(t *testing.T) {
 	t.Parallel()
 	srv := newTestServer(`<html><body><div>x</div></body></html>`, http.StatusOK) // thin: triggers the render
@@ -162,13 +163,13 @@ func TestEnrich_HomepageRender_BlocksInternalTarget(t *testing.T) {
 // for any stealth-configured Enricher (go-wp's production pattern — see
 // internal/wptools/content/enrich.go's enriche.WithStealth(d.stealthClient)
 // call). WithStealth must route the caller's client through
-// fetch.GuardClient (see fetch/ssrf_test.go's TestGuardClient_* for the
-// composition-mechanism proof) rather than passing it through raw.
+// httputil.NewSSRFGuardedClient (go-kit; see its own TestNewSSRFGuardedClient_*
+// for the composition-mechanism proof) rather than passing it through raw.
 //
-// A bare *http.Client stands in for the stealth client here (GuardClient's
+// A bare *http.Client stands in for the stealth client here (the
 // *http.Transport/nil-Transport branch — the custom-RoundTripper branch,
 // which is what go-stealth's actual client shape hits, is proven directly in
-// fetch/ssrf_test.go). The point under test is END-TO-END: that Enrich()
+// go-kit's own httputil/ssrf_test.go). The point under test is END-TO-END: that Enrich()
 // never reaches the loopback test server through a WithStealth-built
 // Enricher.
 func TestWithStealth_GuardsAgainstInternalTarget(t *testing.T) {
