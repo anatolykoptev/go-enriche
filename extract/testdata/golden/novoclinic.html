@@ -1,0 +1,32 @@
+<!DOCTYPE html><html lang="ru"><head><title>Novoclinic</title>
+<!--
+  REAL capture (novoclinicspb.ru, 2026-07-02) — the applyRegexFallback
+  over-strip regression golden (FIX-2). The site is Tilda-built: EVERY
+  content block, including the venue's own phone number, carries a literal
+  "widget" class token (Tilda's universal block-wrapper convention, not a
+  sidebar widget) — confirmed live: 653 elements match .widget, and ZERO
+  <header>/<footer>/<nav>/<aside> tags exist on the page at all. This golden
+  retains that structure so the fallback's junk-avoidance strip is exercised
+  against the REAL risk: removeSelectors' ".widget" selector (used by
+  ExtractGoquery's own content extraction) would strip the phone itself, not
+  just a sidebar. applyRegexFallback must use the narrower stripNoiseHTML
+  (script/style/noscript/template/svg/head only — see goquery.go) so this
+  phone survives.
+
+  The junk source is the inline style block below: Tilda emits a
+  letter-spacing rule per text node, for the SAME .textable.css6 class the
+  real phone below carries, whose fractional digits happen to form an
+  11-digit run that is itself ValidatePhone-shaped (Rossvyaz 401-499
+  landline range) and, pre-fix, won the page's only phone slot. See
+  TestExtractFacts_RegexFallbackSkipsBoilerplateJunk (facts_test.go) for the
+  exact junk value this golden guards against.
+-->
+<style>
+.textable.css6  { text-align: right; font-family: "Open Sans"; font-size: 16px; line-height: 1.723076923076923; letter-spacing: 0.06153846153846154em; opacity: 1 }
+</style>
+</head><body>
+<div class="node css3 widget-text cr-text widget"><p class="textable css129">Санкт-Петербург, Ст. м. Фрунзенская, Красуцкого д. 3 лит. М</p></div>
+<div class="node css0 widget-text cr-text widget"><p class="textable css5">+7 921-331-52-55</p></div>
+<div class="node css3 widget-text cr-text widget xs-hidden sm-hidden"><p class="textable css6">+7 (921) 331-52-55</p></div>
+<div class="node css3 widget-text cr-text widget"><p class="textable css130">novoclinicspb@yandex.ru</p></div>
+</body></html>

@@ -215,6 +215,89 @@ func TestApplyContactOverride_NoSocialLinkKeepsTel(t *testing.T) {
 
 // A social-link 8-800 (unheard of, but guard it) must be demoted, not treated
 // as the top authority — toll-free is never a venue's owned local line.
+// TestDNITrustworthy_AgreesBetweenResolverAndSiteNumbers is the FIX-3
+// integration guard: resolvePhoneForCityDNI's DNI-branch pick/omit decision
+// and CollectSiteNumbers' per-candidate Trustworthy verdict (sitenumbers.go)
+// are both driven through the SAME shared predicate (dniTrustworthy,
+// contacts.go) and must never disagree on a DNI-active page — the exact
+// fail-OPEN risk the shared predicate exists to close (an unlisted vendor
+// causing a rotating proxy to be marked Trustworthy where the resolver would
+// have failed closed). Table-driven across {tier x dni} via single-candidate
+// synthetic docs so each case is isolated.
+func TestDNITrustworthy_AgreesBetweenResolverAndSiteNumbers(t *testing.T) {
+	t.Parallel()
+	const mangoScript = `<script src="https://widgets.mango-office.ru/widgets/mango.js"></script>`
+
+	cases := []struct {
+		name string
+		html string
+		// wantTrusted is CollectSiteNumbers' expected Trustworthy verdict for
+		// the fixture's sole candidate.
+		wantTrusted bool
+		// checkResolver, when true, additionally asserts
+		// resolvePhoneForCityDNI's pick/omit decision agrees with
+		// wantTrusted. Scoped to DNI-active pages only: on a clean page
+		// pickPhoneCandidate always returns its best-available candidate
+		// regardless of anchoring (a display "best guess", not a trust
+		// gate) — a different, deliberately looser semantic than the
+		// SiteNumbers sidecar's Trustworthy bar, so comparing them there
+		// would be apples-to-oranges. The DNI branch is the one place both
+		// paths make the identical omit-or-trust decision.
+		checkResolver bool
+	}{
+		{
+			name:        "contacts_tier_no_dni_is_trustworthy",
+			html:        `<html><body><div class="contacts"><a href="tel:+78120001111">+7 (812) 000-11-11</a></div></body></html>`,
+			wantTrusted: true,
+		},
+		{
+			name:        "body_tier_no_dni_is_not_trustworthy",
+			html:        `<html><body><p>Звоните <a href="tel:+78120002222">+7 (812) 000-22-22</a></p></body></html>`,
+			wantTrusted: false,
+		},
+		{
+			name:          "contacts_tier_dni_active_is_not_trustworthy",
+			html:          `<html><head>` + mangoScript + `</head><body><div class="contacts"><a href="tel:+78120003333">+7 (812) 000-33-33</a></div></body></html>`,
+			wantTrusted:   false,
+			checkResolver: true,
+		},
+		{
+			name:          "social_link_dni_active_is_trustworthy",
+			html:          `<html><head>` + mangoScript + `</head><body><a href="https://wa.me/78120004444">WhatsApp</a></body></html>`,
+			wantTrusted:   true,
+			checkResolver: true,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			doc, err := documentFromHTML(tc.html)
+			if err != nil || doc == nil {
+				t.Fatalf("parse: %v", err)
+			}
+
+			nums := CollectSiteNumbers(doc, false) // no separate raw-fetch stage in this fixture
+			if len(nums) != 1 {
+				t.Fatalf("len(SiteNumbers) = %d, want exactly 1 candidate on this fixture; got %+v", len(nums), nums)
+			}
+			if nums[0].Trustworthy != tc.wantTrusted {
+				t.Errorf("CollectSiteNumbers Trustworthy = %v, want %v", nums[0].Trustworthy, tc.wantTrusted)
+			}
+
+			if !tc.checkResolver {
+				return
+			}
+			_, _, ok, dniOmit := resolvePhoneForCityDNI(doc, "")
+			gotPicked := ok && !dniOmit
+			if gotPicked != tc.wantTrusted {
+				t.Errorf("resolvePhoneForCityDNI picked=%v (ok=%v dniOmit=%v), want picked=%v — DISAGREES with CollectSiteNumbers' Trustworthy=%v for the SAME candidate", gotPicked, ok, dniOmit, tc.wantTrusted, nums[0].Trustworthy)
+			}
+		})
+	}
+}
+
 func TestSocialLink_TollFreeStillDemoted(t *testing.T) {
 	t.Parallel()
 	html := `<html><body>
