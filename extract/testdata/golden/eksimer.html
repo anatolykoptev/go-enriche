@@ -1,0 +1,27 @@
+<!DOCTYPE html><html lang="ru"><head><title>Экзимер — офтальмологическая клиника</title>
+<!--
+  REPRESENTATIVE (synthetic, modeled on a Calltouch-DNI clinic site) — the P2
+  SiteNumbers calibration case (see extract/sitenumbers.go and
+  extract/sitenumbers_test.go). The site runs Calltouch dynamic-number-
+  insertion, so the visible header tel: is a ROTATING proxy slot, not a
+  stable number — the fail-closed page-level DNI gate must mark it NOT
+  Trustworthy. The only DNI-immune phone is the hard-coded WhatsApp
+  click-to-chat href (+7 812 325-55-35) — the clinic's real, owned line — so
+  it alone is Trustworthy despite the active Calltouch vendor.
+
+  A separate maps/aggregator card phone (561-13-62, the operator's known
+  calibration value for the wrong-phone class this fix defeats) is NOT part
+  of this page's own HTML at all — it lives only on an external 2GIS/Yandex
+  listing. CollectSiteNumbers reads only the site's own DOM, so that card
+  number is absent from the returned set by construction, never by a
+  special-case filter.
+-->
+<script src="https://mod.calltouch.ru/init.js" async></script>
+</head><body>
+<header class="header">
+  <a href="tel:+78123001199" class="phone">+7 (812) 300-11-99</a>
+</header>
+<div class="footer-contacts">
+  <a href="https://api.whatsapp.com/send?phone=78123255535">WhatsApp</a>
+</div>
+</body></html>

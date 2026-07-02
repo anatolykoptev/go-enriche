@@ -241,6 +241,161 @@ func TestEnrich_ContactsPage_NoDiscoveryWhenNoLink(t *testing.T) {
 	}
 }
 
+// homeRichNoPhoneLinksContacts is a homepage complete on hours/email/address
+// but with ZERO phone at all — homepageMissingRichField's anchored-phone leg
+// fires regardless of the other fields, so /contacts discovery still runs.
+const homeRichNoPhoneLinksContacts = `<!DOCTYPE html><html lang="ru"><head><title>Кафе</title></head>
+<body><article><h1>О кафе</h1>
+<p>Уютное кафе в центре города. Мы готовим вкусные блюда из свежих продуктов
+каждый день и рады гостям с самого утра до позднего вечера. Большой выбор
+напитков, десертов и сезонное меню. Приходите всей семьёй — у нас уютно.</p>
+<a href="mailto:hello@cafe.ru">hello@cafe.ru</a>
+<address>Невский проспект, 28</address>
+<div><span>Часы работы</span><span>Пн-Вс 10:00-22:00</span></div>
+<nav><a href="/contacts/">Контакты</a></nav>
+</article></body></html>`
+
+// contactsPagePhoneOnlyAnchored is a /contacts page whose ONLY fact is a
+// single anchored (contacts-region) tel: — strictly FEWER structured facts
+// (1) than homeRichNoPhoneLinksContacts (3: address+hours+email), so the
+// richness gate (contactFactCount) must skip the Facts MERGE entirely.
+const contactsPagePhoneOnlyAnchored = `<!DOCTYPE html><html lang="ru"><head><title>Контакты</title></head>
+<body><div class="contacts">
+<a href="tel:+78120000099">+7 (812) 000-00-99</a>
+</div></body></html>`
+
+// TestEnrich_ContactsPage_SiteNumbersSurviveRichnessGate is the FIX-1
+// headline: a homepage complete on hours/email/address but with NO phone
+// triggers /contacts discovery (homepageMissingRichField's anchored-phone
+// leg). The /contacts page carries ONLY an anchored tel: — fewer structured
+// facts than the homepage — so contactFactCount's richness gate must skip
+// the Facts MERGE (Facts.Phone stays nil, additive-only guarantee: the
+// single-winner path is untouched). But the full candidate-set sidecar
+// (Result.SiteNumbers) must still pick up that anchored phone: it
+// accumulates from EVERY page actually fetched+parsed, independent of the
+// richness gate that governs only the single-winner merge. Before the fix,
+// addSiteNumbers sat AFTER the early return and this candidate was silently
+// dropped — the feature's own headline case doing nothing.
+func TestEnrich_ContactsPage_SiteNumbersSurviveRichnessGate(t *testing.T) {
+	t.Parallel()
+	srv := newMultiPathServer(map[string]string{
+		"/":          homeRichNoPhoneLinksContacts,
+		"/contacts/": contactsPagePhoneOnlyAnchored,
+	})
+	defer srv.Close()
+
+	var discovered, resolved int
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		// Guard-B (checkTarget) defaults to the real httputil.CheckRawURL (go-kit), which
+		// refuses a loopback target — allow it here since contactsURL points at
+		// the local httptest server in these tests (see allowAllTargets).
+		WithTargetGuard(allowAllTargets),
+		WithMapsChecker(&mockMapsChecker{lat: 59.93, lon: 30.33}),
+		WithMetrics(&Metrics{
+			OnContactsPageDiscovered: func() { discovered++ },
+			OnContactsPageResolved:   func() { resolved++ },
+		}),
+	)
+	result, err := e.Enrich(context.Background(), Item{
+		Name: "Кафе", URL: srv.URL + "/", City: "Санкт-Петербург", Mode: ModePlaces,
+	})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+	if discovered != 1 {
+		t.Fatalf("OnContactsPageDiscovered = %d, want 1 (homepage has zero phone, must still discover /contacts)", discovered)
+	}
+	// The richness gate must skip the Facts MERGE: the /contacts page (1
+	// fact: the phone) is not strictly richer than the homepage (3 facts:
+	// address+hours+email), so resolved must stay 0 and Facts.Phone nil.
+	if resolved != 0 {
+		t.Fatalf("OnContactsPageResolved = %d, want 0 (richness gate must skip the Facts merge for a no-richer contacts page)", resolved)
+	}
+	if result.Facts.Phone != nil {
+		t.Fatalf("Facts.Phone = %q, want nil (richness gate skipped the merge — Facts.Phone must stay byte-stable)", *result.Facts.Phone)
+	}
+	found := false
+	for _, n := range result.SiteNumbers {
+		if strings.Contains(n.Value, "000-00-99") {
+			found = true
+			if !n.Anchored || !n.Trustworthy {
+				t.Errorf("SiteNumbers entry for 000-00-99 = %+v, want Anchored=true Trustworthy=true", n)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("SiteNumbers missing the /contacts anchored phone (richness-gate-skipped page); got %+v", result.SiteNumbers)
+	}
+}
+
+// homeWeakPhoneLinksContacts carries a phone as a WEAK, plain body tel:
+// (tierBody — not anchored, not Trustworthy) and links /contacts. Missing
+// hours/email/address, so /contacts discovery fires regardless of the
+// anchored-phone leg.
+const homeWeakPhoneLinksContacts = `<!DOCTYPE html><html lang="ru"><head><title>Студия</title></head>
+<body><article><h1>О студии</h1>
+<p>Студия работает уже много лет и помогает клиентам с самыми разными задачами.
+Мы гордимся качеством работы и вниманием к каждому проекту, большим и малым.
+Обращайтесь в любое время — всегда рады новым клиентам и их идеям.</p>
+Звоните: <a href="tel:+78120001122">+7 (812) 000-11-22</a>
+<nav><a href="/contacts/">Контакты</a></nav>
+</article></body></html>`
+
+// contactsPageStrongSamePhone carries the SAME digits as an ANCHORED,
+// Trustworthy contacts-region tel: (tierContacts) plus an email — strictly
+// richer than homeWeakPhoneLinksContacts, so the richness gate does not
+// skip the merge.
+const contactsPageStrongSamePhone = `<!DOCTYPE html><html lang="ru"><head><title>Контакты</title></head>
+<body><div class="contacts">
+<a href="tel:+78120001122">+7 (812) 000-11-22</a>
+<a href="mailto:studio@example.ru">studio@example.ru</a>
+</div></body></html>`
+
+// TestEnrich_SiteNumbersSnapshot_HigherRankReadingWins is the FIX-5
+// headline: the SAME phone number appears on BOTH the homepage (a weak,
+// unanchored body tel:) and the /contacts page (an anchored, Trustworthy
+// contacts-region tel:). siteNumbersSnapshot's dedup must keep the
+// STRONGER (Trustworthy) reading, not whichever page happened to merge
+// first or last.
+func TestEnrich_SiteNumbersSnapshot_HigherRankReadingWins(t *testing.T) {
+	t.Parallel()
+	srv := newMultiPathServer(map[string]string{
+		"/":          homeWeakPhoneLinksContacts,
+		"/contacts/": contactsPageStrongSamePhone,
+	})
+	defer srv.Close()
+
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		// Guard-B (checkTarget) defaults to the real httputil.CheckRawURL (go-kit), which
+		// refuses a loopback target — allow it here since contactsURL points at
+		// the local httptest server in these tests (see allowAllTargets).
+		WithTargetGuard(allowAllTargets),
+		WithMapsChecker(&mockMapsChecker{lat: 59.93, lon: 30.33}),
+	)
+	result, err := e.Enrich(context.Background(), Item{
+		Name: "Студия", URL: srv.URL + "/", City: "Санкт-Петербург", Mode: ModePlaces,
+	})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+
+	var matches int
+	for _, n := range result.SiteNumbers {
+		if !strings.Contains(n.Value, "000-11-22") {
+			continue
+		}
+		matches++
+		if !n.Anchored || !n.Trustworthy {
+			t.Errorf("SiteNumbers entry for 000-11-22 = %+v, want the STRONGER (Anchored=true Trustworthy=true) contacts-page reading to survive the dedup, not the weak homepage body-tel: reading", n)
+		}
+	}
+	if matches != 1 {
+		t.Fatalf("SiteNumbers has %d entries for 000-11-22, want exactly 1 (deduped across homepage + /contacts)", matches)
+	}
+}
+
 // mockMapsCheckerPhone returns a maps card carrying a phone (the rotating-class
 // number a DNI venue's maps entry often holds) so the DNI-poison test can prove
 // the maps phone does NOT survive a contacts-page poison verdict.
@@ -306,6 +461,85 @@ func TestEnrich_PoisonOR_RawDNISurvivesCleanRender(t *testing.T) {
 	// The clean render's address is a non-phone fact and may still surface.
 	if result.Facts.Address == nil || !strings.Contains(*result.Facts.Address, "Невский") {
 		t.Fatalf("Address = %v, want the rendered address (only the phone is poisoned)", derefOrNil(result.Facts.Address))
+	}
+}
+
+// dniRawShellZeroPhone models a homepage whose RAW HTML runs a Mango DNI
+// widget and carries ZERO phone at all (no tel:, no social link) —
+// contactless, which forces the render (hasContactFacts is false, same gate
+// as dniRawShell above). Because there is no phone candidate on the raw
+// page, resolvePhoneForCityDNI never even reaches its DNI check (it
+// short-circuits on an empty candidate set), so rawFacts.PhonePoisoned
+// alone would be false despite the vendor being active — exactly the gap
+// homeRawPoisoned (enriche_fetch.go) closes via extract.HasDNIVendor.
+const dniRawShellZeroPhone = `<!DOCTYPE html><html lang="ru"><head><title>Клуб</title>
+<script src="https://widgets.mango-office.ru/widgets/mango.js"></script>
+<script>var MangoObject="mango-office";</script></head>
+<body><div id="app"></div></body></html>`
+
+// dniCleanRenderedInjectsTel models the SELF-REMOVING-WIDGET case the
+// Poison-OR mechanism exists to defeat: the RENDERED DOM OMITS the DNI
+// script entirely (the widget rewrote/removed itself at runtime) and shows
+// a plausible tel: in the contacts region — exactly what a rotating proxy
+// looks like once the vendor loader is gone from the post-render markup.
+const dniCleanRenderedInjectsTel = `<!DOCTYPE html><html lang="ru"><head><title>Клуб</title></head>
+<body><article><p>Клуб приглашает гостей каждый день. У нас просторные залы,
+внимательный персонал и удобное расположение в самом центре города рядом с метро.
+Приходите целыми семьями — мы рады каждому посетителю и всегда готовы помочь.</p></article>
+<div class="contacts">
+<a href="tel:+78137938615">+7 (813) 793-86-15</a></div></body></html>`
+
+// TestEnrich_SiteNumbers_PoisonOR_RawDNISurvivesCleanRender is the Critical
+// regression guard (pr-review-council re-review of PR #27, commit 8709dae):
+// a homepage whose RAW fetch runs a DNI vendor but has NO phone at all
+// forces a render (contactless raw). The RENDERED DOM omits the vendor
+// script and injects a tel: — the exact self-removing-widget case the
+// Facts.Phone Poison-OR (enriche_fetch.go:165) already defeats. Before this
+// fix, CollectSiteNumbersHTML re-ran detectDNIVendor independently on ONLY
+// the rendered HTML, saw no vendor, and marked the injected (rotating-proxy)
+// tel: Trustworthy=true in the exported, cache-persisted Result.SiteNumbers
+// — laundering it past the same anti-fab guarantee Facts.Phone already
+// enforces. The fix ORs the raw-fetch poison signal (homeRawPoisoned) into
+// the page-level DNI the Trustworthy gate uses, so the candidate fails
+// closed regardless of what the rendered DOM looks like.
+func TestEnrich_SiteNumbers_PoisonOR_RawDNISurvivesCleanRender(t *testing.T) {
+	t.Parallel()
+	srv := newMultiPathServer(map[string]string{"/": dniRawShellZeroPhone})
+	defer srv.Close()
+
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		// Guard-B (checkTarget) defaults to the real httputil.CheckRawURL (go-kit), which
+		// refuses a loopback target — allow it here since contactsURL points at
+		// the local httptest server in these tests (see allowAllTargets).
+		WithTargetGuard(allowAllTargets),
+		WithMapsChecker(&mockMapsChecker{lat: 59.93, lon: 30.33}),
+		WithBrowserFetch(func(_ context.Context, _ string) (string, error) {
+			return dniCleanRenderedInjectsTel, nil
+		}),
+	)
+	result, err := e.Enrich(context.Background(), Item{
+		Name: "Клуб", URL: srv.URL + "/", City: "Санкт-Петербург", Mode: ModePlaces,
+	})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+
+	found := false
+	for _, n := range result.SiteNumbers {
+		if !strings.Contains(n.Value, "793-86-15") {
+			continue
+		}
+		found = true
+		if !n.DNI {
+			t.Errorf("SiteNumbers entry for 793-86-15 DNI = false, want true (the raw-fetch poison verdict must survive the clean render)")
+		}
+		if n.Trustworthy {
+			t.Errorf("SiteNumbers entry for 793-86-15 Trustworthy = true, want false (pre-fix bug: an injected rotating-proxy tel: laundered as trustworthy because the RENDERED DOM alone looked clean)")
+		}
+	}
+	if !found {
+		t.Fatalf("SiteNumbers missing the rendered 793-86-15 candidate; got %+v", result.SiteNumbers)
 	}
 }
 
@@ -475,9 +709,27 @@ func TestEnrich_ContactsPagePoisonOR_RawDNISurvivesCleanRender(t *testing.T) {
 }
 
 // homeCompleteContacts is a homepage that already carries email + hours +
-// address (all the RICH fields a /contacts page would supply) AND links a
-// /contacts/ page. The FIX-3 perf gate must SKIP discovery: nothing to gain.
+// address + an ANCHORED (contacts-region) phone — all the RICH fields a
+// /contacts page would supply — AND links a /contacts/ page. The FIX-3 perf
+// gate (widened in P2 to also require an anchored phone member — see
+// homepageMissingRichField) must SKIP discovery: nothing to gain.
 const homeCompleteContacts = `<!DOCTYPE html><html lang="ru"><head><title>Кафе</title></head>
+<body><article><h1>О кафе</h1>
+<p>Уютное кафе в центре города. Мы готовим вкусные блюда из свежих продуктов
+каждый день и рады гостям с самого утра до позднего вечера. Большой выбор
+напитков, десертов и сезонное меню. Приходите всей семьёй — у нас уютно.</p>
+<a href="mailto:hello@cafe.ru">hello@cafe.ru</a>
+<address>Невский проспект, 28</address>
+<div class="contacts"><a href="tel:+78120000001">+7 (812) 000-00-01</a></div>
+<div><span>Часы работы</span><span>Пн-Вс 10:00-22:00</span></div>
+<nav><a href="/contacts/">Контакты</a></nav>
+</article></body></html>`
+
+// homeCompleteNoAnchoredPhone is homeCompleteContacts WITHOUT any phone at
+// all: complete on hours/email/address (the pre-P2 gate), but carrying ZERO
+// anchored phone member. The P2-widened FIX-3 gate must NOT skip discovery
+// for this homepage — see TestEnrich_ContactsPageGate_NoAnchoredPhoneStillFetches.
+const homeCompleteNoAnchoredPhone = `<!DOCTYPE html><html lang="ru"><head><title>Кафе</title></head>
 <body><article><h1>О кафе</h1>
 <p>Уютное кафе в центре города. Мы готовим вкусные блюда из свежих продуктов
 каждый день и рады гостям с самого утра до позднего вечера. Большой выбор
@@ -528,6 +780,63 @@ func TestEnrich_ContactsPageGate_CompleteHomepageSkipsFetch(t *testing.T) {
 	}
 	if discovered != 0 {
 		t.Fatalf("OnContactsPageDiscovered = %d, want 0 (complete homepage must skip the contacts fetch)", discovered)
+	}
+}
+
+// TestEnrich_ContactsPageGate_NoAnchoredPhoneStillFetches is the P2 golden:
+// a homepage that is "complete" under the PRE-P2 gate (hours+email+address
+// all present) but carries ZERO anchored phone member must still fetch
+// /contacts — a phone-only-on-/contacts venue must not be silently skipped
+// just because the OTHER rich fields happen to already be on the homepage.
+// The contacts-page number must surface both in Facts.Phone and in the
+// additive Result.SiteNumbers set.
+func TestEnrich_ContactsPageGate_NoAnchoredPhoneStillFetches(t *testing.T) {
+	t.Parallel()
+	srv := newMultiPathServer(map[string]string{
+		"/":          homeCompleteNoAnchoredPhone,
+		"/contacts/": contactsPageRich, // carries the +7 (812) 439-11-00 anchored tel:
+	})
+	defer srv.Close()
+
+	var discovered, resolved int
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		// Guard-B (checkTarget) defaults to the real httputil.CheckRawURL (go-kit), which
+		// refuses a loopback target — allow it here since contactsURL points at
+		// the local httptest server in these tests (see allowAllTargets).
+		WithTargetGuard(allowAllTargets),
+		WithMapsChecker(&mockMapsChecker{lat: 59.93, lon: 30.33}),
+		WithMetrics(&Metrics{
+			OnContactsPageDiscovered: func() { discovered++ },
+			OnContactsPageResolved:   func() { resolved++ },
+		}),
+	)
+	result, err := e.Enrich(context.Background(), Item{
+		Name: "Кафе", URL: srv.URL + "/", City: "Санкт-Петербург", Mode: ModePlaces,
+	})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+	if discovered != 1 {
+		t.Fatalf("OnContactsPageDiscovered = %d, want 1 (a homepage with zero anchored phone member must still fetch /contacts)", discovered)
+	}
+	if resolved != 1 {
+		t.Fatalf("OnContactsPageResolved = %d, want 1", resolved)
+	}
+	if result.Facts.Phone == nil || !strings.Contains(*result.Facts.Phone, "439-11-00") {
+		t.Fatalf("Phone = %v, want the contacts-page 812 phone", derefOrNil(result.Facts.Phone))
+	}
+	found := false
+	for _, n := range result.SiteNumbers {
+		if strings.Contains(n.Value, "439-11-00") {
+			found = true
+			if !n.Anchored || !n.Trustworthy {
+				t.Errorf("SiteNumbers entry for 439-11-00 = %+v, want Anchored=true Trustworthy=true", n)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("SiteNumbers missing the contacts-page 439-11-00 candidate; got %+v", result.SiteNumbers)
 	}
 }
 

@@ -32,18 +32,25 @@ const minRenderShellBytes = 512
 // so the contacts page inherits every anti-fab guarantee (DNI-poison omit,
 // social-link-over-rotating-tel:, operator-seed supremacy) for free. A
 // discovered page that yields nothing new never displaces the homepage facts.
-func (e *Enricher) resolveContactsPage(ctx context.Context, item Item, result *Result, r *resolver, homeHTML string, homeFacts extract.Facts) {
+//
+// homeSiteNumbers is the homepage's full candidate phone-number SET (Phase
+// P2, additive — extract.CollectSiteNumbersHTML(siteHTML) computed once at
+// the caller), reused here ONLY to widen the discovery gate (see
+// homepageMissingRichField) — it does not otherwise change this function's
+// behavior.
+func (e *Enricher) resolveContactsPage(ctx context.Context, item Item, result *Result, r *resolver, homeHTML string, homeFacts extract.Facts, homeSiteNumbers []extract.PhoneNumberFact) {
 	if homeHTML == "" {
 		return
 	}
 	// Gate the (network-cost) contacts-page discovery+fetch on the homepage
-	// actually MISSING a RICH field that lives on a /contacts page — hours, email,
-	// or address. A homepage that already carries all three has nothing to gain
-	// from the second fetch, so skip it and spare the round-trip. The gate is
-	// deliberately NOT a blunt "homepage has no contact fact": a phone-only
-	// homepage still fetches /contacts (that is exactly where the «часы»/email we
-	// are after live), it just no longer fetches when the homepage is complete.
-	if !homepageMissingRichField(homeFacts) {
+	// actually MISSING a RICH field that lives on a /contacts page — hours,
+	// email, address, or (P2) an ANCHORED phone member. A homepage that already
+	// carries all four has nothing to gain from the second fetch, so skip it
+	// and spare the round-trip. The gate is deliberately NOT a blunt "homepage
+	// has no contact fact": a phone-only homepage still fetches /contacts (that
+	// is exactly where the «часы»/email we are after live), it just no longer
+	// fetches when the homepage is complete.
+	if !homepageMissingRichField(homeFacts, homeSiteNumbers) {
 		return
 	}
 	contactsURL, ok := extract.DiscoverContactsPage(homeHTML, result.URL)
@@ -69,6 +76,26 @@ func (e *Enricher) resolveContactsPage(ctx context.Context, item Item, result *R
 		contactsFacts.PhonePoisoned = true
 		contactsFacts.Phone = nil
 	}
+	// Accumulate the contacts page's full candidate phone-number SET (Phase
+	// P2, additive) into the resolver's SiteNumbers sidecar UNCONDITIONALLY,
+	// same as the homepage merge (enriche_fetch.go) — deliberately BEFORE the
+	// richness-gate early-return below. The richness gate governs only the
+	// single-winner Facts MERGE; the full-candidate-set sidecar is an
+	// orthogonal, read-only accumulator that must reflect EVERY page actually
+	// fetched+parsed, regardless of whether that page won the merge. A
+	// /contacts page fetched specifically because the homepage lacked an
+	// anchored phone member (see homepageMissingRichField) is exactly the
+	// page most likely to carry FEWER total facts than a richer homepage
+	// (hours+email+address) while still being the page the anchored phone
+	// lives on — gating this accumulation on richness would silently drop
+	// the feature's own headline case. rawPoisoned carries the Poison-OR
+	// forward into the sidecar (mirrors the rawPoisoned carry-forward onto
+	// contactsFacts.PhonePoisoned above): a /contacts page whose RAW fetch
+	// ran a DNI widget that rewrote/removed itself before contactsHTML (a
+	// render) was captured must still fail closed — see
+	// CollectSiteNumbersHTML's pagePoisoned doc comment.
+	r.addSiteNumbers(extract.CollectSiteNumbersHTML(contactsHTML, rawPoisoned))
+
 	// Adopt the contacts page only when it is STRICTLY richer than the homepage
 	// in structured contact facts — a contacts page that surfaced nothing new
 	// must not re-merge (and a PhonePoisoned contacts page must still be able to
@@ -89,14 +116,35 @@ func (e *Enricher) resolveContactsPage(ctx context.Context, item Item, result *R
 
 // homepageMissingRichField reports whether the homepage lacks at least one of
 // the RICH contact fields that a dedicated /contacts page typically carries:
-// hours, email, or address. When all three are already present the homepage is
-// "complete" for contacts-page purposes and the second fetch is skipped (a perf
-// gate — the contacts page could only re-supply what we already have). Phone is
-// intentionally excluded: a phone-only homepage is still missing hours/email/
-// address, so it must keep fetching /contacts. PhonePoisoned is irrelevant to
-// the gate — it concerns the phone, which the gate does not consider.
-func homepageMissingRichField(f extract.Facts) bool {
-	return f.Hours == nil || f.Email == nil || f.Address == nil
+// hours, email, address, or (Phase P2) an ANCHORED phone member. When all four
+// are already present the homepage is "complete" for contacts-page purposes
+// and the second fetch is skipped (a perf gate — the contacts page could only
+// re-supply what we already have). PhonePoisoned is irrelevant to the gate —
+// it concerns the phone's TRUSTWORTHINESS, not whether an anchored member
+// exists at all.
+//
+// The phone leg is deliberately keyed on siteNumbers (the DOM-level candidate
+// SET), not f.Phone: pickPhoneCandidate already collapsed f.Phone to a single
+// winner, which says nothing about whether that winner — or any candidate —
+// was ANCHORED (contacts-region/social-link/microdata) versus a bare-body/
+// demoted read. A homepage whose only phone signal is unanchored is exactly
+// the class a /contacts page is likely to supply the real, anchored number
+// for (the P2 calibration gap: Lazermed's real site tel: differs from the
+// resolver's top-tier pick).
+func homepageMissingRichField(f extract.Facts, siteNumbers []extract.PhoneNumberFact) bool {
+	return f.Hours == nil || f.Email == nil || f.Address == nil || !hasAnchoredSiteNumber(siteNumbers)
+}
+
+// hasAnchoredSiteNumber reports whether siteNumbers carries at least one
+// Anchored candidate (contacts-region tel: / social-link / microdata) — i.e.
+// NOT merely a bare-body tel: or a call-tracking-demoted one.
+func hasAnchoredSiteNumber(siteNumbers []extract.PhoneNumberFact) bool {
+	for _, n := range siteNumbers {
+		if n.Anchored {
+			return true
+		}
+	}
+	return false
 }
 
 // fetchContactsHTML returns the best available HTML for the contacts page plus

@@ -35,6 +35,50 @@ var removeSelectors = strings.Join([]string{
 // contentSelectors are tried in order to find the main content element.
 const contentSelectors = "article, main, .content, .post-content, .article-content, #content"
 
+// stripBoilerplate removes non-content HTML elements (script/style/nav/ads/...
+// — see removeSelectors) from doc in place. Used ONLY by ExtractGoquery's own
+// main-content extraction below — NOT by applyRegexFallback (extract/facts.go),
+// which needs the much narrower stripNoise (see its doc comment for why).
+func stripBoilerplate(doc *goquery.Document) {
+	removeElements(doc, removeSelectors)
+}
+
+// removeNoiseSelectors are non-textual elements that can never legitimately
+// carry a phone/address/price value: script/style payloads, embedded
+// iframes/SVG icons, and the document <head> (title/meta/inline <style>).
+// Deliberately narrower than removeSelectors: applyRegexFallback's
+// junk-avoidance scoping (extract/facts.go) must strip a CSS/script decimal
+// before it can misread as a phone number (the Novoclinic bug — see
+// stripNoiseHTML in facts.go) WITHOUT also stripping header/footer/nav/aside/
+// .widget/.banner/[role=contentinfo] the way removeSelectors does. Those
+// containers legitimately carry a RU-SMB venue's plain-text contact info —
+// on a real Tilda-built page (novoclinicspb.ru) EVERY content block,
+// including the venue's own phone number, carries a literal "widget" class
+// token (Tilda's universal block-wrapper convention, not a sidebar widget),
+// so removeSelectors' ".widget" selector would strip the phone itself.
+var removeNoiseSelectors = strings.Join([]string{
+	"script", "style", "noscript", "template", "svg", "head",
+}, ", ")
+
+// stripNoise removes only the non-textual, never-a-contact-value elements
+// (see removeNoiseSelectors) from doc in place — the narrow scope
+// applyRegexFallback's junk-avoidance needs, as opposed to stripBoilerplate's
+// full main-content strip.
+func stripNoise(doc *goquery.Document) {
+	removeElements(doc, removeNoiseSelectors)
+}
+
+// removeElements removes every element doc matches against the given CSS
+// selector list, in place. Shared control flow for stripBoilerplate and
+// stripNoise — they differ ONLY by which selector list governs the strip;
+// both named entry points (and their distinct selector consts) stay so
+// callers keep a semantically clear name for which scope they want.
+func removeElements(doc *goquery.Document, selectors string) {
+	doc.Find(selectors).Each(func(_ int, s *goquery.Selection) {
+		s.Remove()
+	})
+}
+
 // ExtractGoquery uses goquery CSS selectors to extract main content.
 // Returns content in the requested format and the page title.
 func ExtractGoquery(rawHTML string, format Format) (content string, title string) {
@@ -54,9 +98,7 @@ func ExtractGoquery(rawHTML string, format Format) (content string, title string
 	}
 
 	// Remove boilerplate elements.
-	doc.Find(removeSelectors).Each(func(_ int, s *goquery.Selection) {
-		s.Remove()
-	})
+	stripBoilerplate(doc)
 
 	// Find main content container.
 	contentSel := doc.Find(contentSelectors).First()

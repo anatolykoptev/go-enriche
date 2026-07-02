@@ -1,0 +1,18 @@
+<!DOCTYPE html><html lang="ru"><head><title>Лазермед — медицинский центр</title>
+<!--
+  REPRESENTATIVE (synthetic) — the P2 SiteNumbers calibration case: a CLEAN
+  (no DNI/call-tracking vendor) site whose pickPhoneCandidate winner is the
+  hard-coded WhatsApp number (tierSocialLink always wins unconditionally —
+  see pickPhoneCandidate rule 1), but the page ALSO carries a real, DIFFERENT
+  contacts-region tel: (+7 812 571-46-12) that pickPhoneCandidate discards.
+  Before P2 that discarded-but-valid number was invisible past the resolver
+  and would read as WRONG downstream; CollectSiteNumbers now exposes it as a
+  Trustworthy member of the site's own phone SET — no DNI vendor is present,
+  so every anchored candidate is Trustworthy, not just the social-link pick.
+-->
+</head><body>
+<div class="contacts">
+  <a href="tel:+78125714612">+7 (812) 571-46-12</a>
+</div>
+<a href="https://wa.me/79219998877">WhatsApp</a>
+</body></html>

@@ -3,6 +3,7 @@ package extract
 import (
 	"strings"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/anatolykoptev/go-enriche/structured"
 )
 
@@ -75,8 +76,12 @@ func ExtractFactsForCity(html, pageURL, city string) Facts {
 		applyOrgFacts(data, html, &facts)
 	}
 
-	// Layer 2: regex fallback — only fills nil fields.
-	applyRegexFallback(html, &facts)
+	// Layer 2: regex fallback — only fills nil fields. Scoped to
+	// noise-stripped HTML (script/style/noscript/template/svg/head removed —
+	// see stripNoise) rather than raw html, so a CSS/script decimal can never
+	// surface as a junk "phone" (the Novoclinic bug — see applyRegexFallback /
+	// stripNoiseHTML).
+	applyRegexFallback(stripNoiseHTML(html), &facts)
 
 	// Layer 3: official-site contact override — a contacts-region tel: href is
 	// authoritative and overrides whatever Layer 1/2 produced; a body tel:
@@ -333,6 +338,37 @@ func orgAddressIsLegal(org *structured.Organization, html string, facts *Facts) 
 		}
 	}
 	return false
+}
+
+// stripNoiseHTML parses html, removes ONLY non-textual noise elements
+// (script/style/noscript/template/svg/head — see stripNoise in goquery.go),
+// and re-serializes the result back to HTML. applyRegexFallback scans this
+// instead of the raw page so a CSS/script decimal (e.g. a letter-spacing
+// value like "0.06153846153846154em") can no longer read as a digit-shaped
+// junk phone/address/price — the root cause of the Novoclinic false phone
+// (84615384615, which even ValidatePhone accepted; REAL capture 2026-07-02,
+// novoclinicspb.ru — a Tilda-built page whose <style> block styles the SAME
+// .textable.css6 class that wraps the real phone number).
+//
+// Deliberately narrower than stripBoilerplate/removeSelectors (used by
+// ExtractGoquery's own content extraction): that strip additionally removes
+// header/footer/nav/aside/.widget/.banner/[role=contentinfo], which on
+// novoclinicspb.ru (and any Tilda-built page — Tilda tags EVERY content
+// block with a literal "widget" class token, not just sidebar widgets)
+// would ALSO strip the venue's real phone/address/price before the regex
+// fallback ever sees them. Falls back to the raw html on a parse error, so
+// a malformed page still gets scanned rather than silently dropped.
+func stripNoiseHTML(html string) string {
+	doc, err := documentFromHTML(html)
+	if err != nil || doc == nil {
+		return html
+	}
+	stripNoise(doc)
+	stripped, err := goquery.OuterHtml(doc.Selection)
+	if err != nil {
+		return html
+	}
+	return stripped
 }
 
 func applyRegexFallback(html string, facts *Facts) {

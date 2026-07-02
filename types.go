@@ -74,6 +74,17 @@ type Result struct {
 	// content layer can persist provenance and protect operator_verified values
 	// on re-enrich. Absent fields stay zero-valued.
 	Provenance Provenance
+
+	// SiteNumbers is the additive (Phase P2) SET of every distinct, valid
+	// site-own phone number found across the official-site fetch (the
+	// homepage plus any discovered /contacts subpage), each tagged
+	// Anchored/DNI/Trustworthy by the SAME fail-closed gate that picks
+	// Facts.Phone — see extract.PhoneNumberFact. pickPhoneCandidate collapses
+	// the candidate set to ONE winner for Facts.Phone; SiteNumbers exposes
+	// the rest, so a consumer can recognize a valid-but-different site number
+	// instead of reading it as WRONG. Read-only sidecar: it never feeds
+	// Facts.Phone. nil when the site fetch found no phone candidate at all.
+	SiteNumbers []extract.PhoneNumberFact
 }
 
 // FieldProvenance is the resolved provenance of one fact: the winning source

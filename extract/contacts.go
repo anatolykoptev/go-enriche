@@ -505,6 +505,22 @@ func resolvePhoneForCity(doc *goquery.Document, city string, prior ...string) (s
 	return phone, region, ok
 }
 
+// dniTrustworthy is the single, canonical DNI-aware phone-trust predicate,
+// shared by resolvePhoneForCityDNI (below — the single-winner official-site
+// phone, Facts.Phone) and PhoneNumberFact.Trustworthy (the SiteNumbers
+// candidate-set sidecar, sitenumbers.go), so the two paths can never
+// diverge: when the page runs DNI/call-tracking, ONLY a hard-coded
+// social-link candidate (tierSocialLink) — immune to rotation — is
+// trustworthy; on a clean page, any anchored (contacts-region-or-above)
+// candidate is. A second, independently-maintained copy of this rule risks
+// failing OPEN (a rotating proxy marked trustworthy) if the two ever drift.
+func dniTrustworthy(tier int, dni bool) bool {
+	if dni {
+		return tier == tierSocialLink
+	}
+	return numberIsAnchored(tier)
+}
+
 // resolvePhoneForCityDNI is resolvePhoneForCity plus a DNI-omit signal. When a
 // call-tracking / dynamic-number-insertion vendor (Roistat/Calltouch/Comagic/
 // Mango/Callibri/UIS) is detected on the page, an injected tel:/microdata phone
@@ -519,10 +535,13 @@ func resolvePhoneForCityDNI(doc *goquery.Document, city string, prior ...string)
 	}
 
 	if _, dni := detectDNIVendor(doc); dni {
-		// Only a hard-coded social-link phone survives DNI rotation. If one
-		// exists, it is the authoritative phone; otherwise omit (the injected
-		// tel:/microdata candidates are all untrustworthy rotating proxies).
-		if i := socialLinkIndex(cands); i >= 0 {
+		// Only a hard-coded social-link phone survives DNI rotation — gated
+		// through dniTrustworthy, the SAME shared predicate the SiteNumbers
+		// sidecar's Trustworthy verdict (sitenumbers.go) reuses, so the two
+		// paths can never diverge. If one exists, it is the authoritative
+		// phone; otherwise omit (the injected tel:/microdata candidates are
+		// all untrustworthy rotating proxies).
+		if i := socialLinkIndex(cands); i >= 0 && dniTrustworthy(cands[i].tier, dni) {
 			return cands[i].value, regionForTier(cands[i].tier), true, false
 		}
 		return "", "", false, true

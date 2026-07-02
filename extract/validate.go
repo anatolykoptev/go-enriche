@@ -8,6 +8,15 @@ import (
 
 var reDigitsOnly = regexp.MustCompile(`\D`)
 
+// DigitsOnly strips every non-digit rune from s. Exported so a caller
+// outside this package (the enriche resolver's phone dedup key, resolve.go)
+// derives the SAME normalization as every phone-tier/dedup key inside this
+// package, rather than hand-rolling a second, potentially-drifting digit
+// filter — see reDigitsOnly.
+func DigitsOnly(s string) string {
+	return reDigitsOnly.ReplaceAllString(s, "")
+}
+
 const maxPriceLen = 60
 
 var (
