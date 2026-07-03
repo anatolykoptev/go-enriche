@@ -99,6 +99,21 @@ func WithBrowserFetch(fn func(ctx context.Context, url string) (string, error)) 
 	return func(e *Enricher) { e.browserFetch = fn }
 }
 
+// WithRenderSkipDisabled toggles the ADR-8 render-skip kill-switch. When disabled
+// is true, the trust-gated render-skip (rawContactsSufficient anchored-SiteNumber
+// escape hatch, go-enriche v1.30.0) is bypassed and the headless render escalates
+// exactly as it did pre-v1.30.0 — on thin content OR a missing single-winner Facts
+// contact — regardless of any anchored raw SiteNumber. Default (disabled=false)
+// keeps the skip ENABLED (the mcmedok 30s->~2s win). This is an OPS revert lever:
+// the DATA consequence of a wrong skip is one-way (a number auto-written to a live
+// paid card cannot be un-published by a code rollback), so the skip must be
+// disable-able without a code change. Intended wiring: go-wp reads a container env
+// (e.g. WP_RENDER_SKIP=off) and passes the boolean here — this package stays
+// env-free (library hygiene).
+func WithRenderSkipDisabled(disabled bool) Option {
+	return func(e *Enricher) { e.renderSkipDisabled = disabled }
+}
+
 // WithFormat sets the output format for extracted content.
 // Default is extract.FormatText (plain text, current behavior).
 // Use extract.FormatMarkdown to preserve links, headings, and formatting.

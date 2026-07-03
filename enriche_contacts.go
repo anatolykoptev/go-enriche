@@ -175,7 +175,16 @@ const (
 // Factored into ONE definition (the fitness test asserts the poisoned+anchored
 // composite lives here alone) so the two legs can never diverge and launder a
 // number through one of them.
-func rawContactsSufficient(rawFacts extract.Facts, siteNumbers []extract.PhoneNumberFact, poisoned bool) bool {
+func rawContactsSufficient(rawFacts extract.Facts, siteNumbers []extract.PhoneNumberFact, poisoned, renderSkipDisabled bool) bool {
+	// ADR-8 kill-switch: with the render-skip disabled, collapse to the
+	// pre-v1.30.0 gate — only a single-winner Facts contact counts as
+	// sufficient, so the trust-gated anchored-SiteNumber arm never suppresses a
+	// render. The ops revert lever for the one-way data consequence of a wrong
+	// skip (see WithRenderSkipDisabled); both legs consult this ONE predicate so
+	// the switch can never take effect on one leg but not the other.
+	if renderSkipDisabled {
+		return hasContactFacts(rawFacts)
+	}
 	return hasContactFacts(rawFacts) || (!poisoned && hasAnchoredSiteNumber(siteNumbers))
 }
 
@@ -243,7 +252,7 @@ func (e *Enricher) fetchContactsHTML(ctx context.Context, contactsURL string, it
 	// hasContactFacts) is the new render-avoidance; the hasContactFacts arm is
 	// the pre-existing skip (which never rendered, so it is NOT flagged as a new
 	// skip).
-	if rawHTML != "" && rawContactsSufficient(rawFacts, rawSiteNumbers, rawPoisoned) {
+	if rawHTML != "" && rawContactsSufficient(rawFacts, rawSiteNumbers, rawPoisoned, e.renderSkipDisabled) {
 		skipped := !hasContactFacts(rawFacts)
 		if skipped {
 			e.metrics.browserRenderSkipped(renderSkipLegContacts, renderSkipReasonRawSufficient)
