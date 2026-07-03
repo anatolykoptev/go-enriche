@@ -1,0 +1,23 @@
+<!DOCTYPE html><html lang="ru"><head><title>Test clinic</title>
+<!--
+  REPRESENTATIVE (synthetic) — the social-link x branch-JSON DNI-collision
+  golden (architecture-council review, security MEDIUM #2). The SAME digits
+  (921 000-11-22) appear BOTH as a hard-coded WhatsApp click-to-chat href
+  (tierSocialLink=5, DNI-immune) AND inside a branch-locator JSON object
+  (tierBranchJSON=4, NOT DNI-immune). Proves the tier placement — branchJSON
+  strictly BELOW social — means DedupeKeepStronger's higher-tier-wins rule
+  keeps the SOCIAL reading on a same-digits collision, so this number's
+  DNI-immunity is never stripped by the weaker branch_json reading of the
+  identical digits. The page also runs a real DNI vendor signature
+  (window.roistatProjectId) so dniTrustworthy's page-level fail-closed gate
+  is actually exercised, not merely assumed absent. The branch array is
+  wrapped in a single-quoted JS STRING LITERAL, matching the real
+  mcmedok.ru marker_data shape branchJSONCandidates targets.
+-->
+<script>window.roistatProjectId = "12345";</script>
+</head><body>
+<div class="contacts"><a href="https://wa.me/79210001122">WhatsApp</a></div>
+<script>
+var branches = '[{"id":"1","phone":"+7 921 000-11-22","region":"spb"}]';
+</script>
+</body></html>

@@ -62,7 +62,8 @@ const (
 	tierMicrodata  = 1 // [itemprop=telephone] / og: / JSON-LD prior phone
 	tierBody       = 2 // a human-facing tel: in the page body
 	tierContacts   = 3 // a tel: in the header/footer/address/contacts region
-	tierSocialLink = 4 // a hard-coded wa.me / api.whatsapp.com phone — DNI-immune
+	tierBranchJSON = 4 // a phone read from a national-chain inline-script branch-locator JSON (branchjson.go) — anchored, NOT DNI-immune
+	tierSocialLink = 5 // a hard-coded wa.me / api.whatsapp.com phone — DNI-immune
 )
 
 // tollFreeAreaCode is the 8-800 toll-free / call-tracking area code. An 8-800

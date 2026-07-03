@@ -79,10 +79,27 @@ type PhoneNumberFact struct {
 // constant that merely duplicates an existing one's value.
 const (
 	numSourceSocialLink = "social_link"
+	numSourceBranchJSON = "branch_json"
 	numSourceMicrodata  = "microdata"
 	numSourceBody       = "body"
 	numSourceDemoted    = "demoted"
 )
+
+// SiteNumberSources is every PhoneNumberFact.Source label this package can
+// emit. Exported so a downstream consumer (go-wp's siteNumberSource/
+// siteNumberPriority switches, internal/wptools/content/sitenumbers.go) can
+// range over it in a fitness test that FAILS ITS BUILD when a label here has
+// no matching case there — turning a silent cross-repo drift (an unhandled
+// Source silently downgrading to numberSourceUnknown / priority 0 in
+// wp_verify's public output) into a loud one instead.
+var SiteNumberSources = []string{
+	numSourceSocialLink,
+	numSourceBranchJSON,
+	regionContacts,
+	numSourceMicrodata,
+	numSourceBody,
+	numSourceDemoted,
+}
 
 // numberSourceForTier maps a phoneCandidate tier to its PhoneNumberFact.Source
 // label.
@@ -90,6 +107,8 @@ func numberSourceForTier(tier int) string {
 	switch tier {
 	case tierSocialLink:
 		return numSourceSocialLink
+	case tierBranchJSON:
+		return numSourceBranchJSON
 	case tierContacts:
 		return regionContacts
 	case tierMicrodata:
@@ -105,7 +124,7 @@ func numberSourceForTier(tier int) string {
 // PhoneNumberFact purposes — see PhoneNumberFact.Anchored's doc comment.
 func numberIsAnchored(tier int) bool {
 	switch tier {
-	case tierContacts, tierSocialLink, tierMicrodata:
+	case tierContacts, tierSocialLink, tierBranchJSON, tierMicrodata:
 		return true
 	default:
 		return false
@@ -151,6 +170,10 @@ func CollectSiteNumbers(doc *goquery.Document, pagePoisoned bool) []PhoneNumberF
 	// regex-fallback / prose-only phone is never a member of this DOM-only
 	// set (see the doc comment above).
 	cands := collectPhoneCandidates(doc)
+	// branchJSONCandidates is unioned into the SiteNumbers SET ONLY — never
+	// into collectPhoneCandidates — so Facts.Phone/pickPhoneCandidate
+	// (contacts.go) stay byte-unchanged (see branchjson.go's doc comment).
+	cands = append(cands, branchJSONCandidates(doc)...)
 	if len(cands) == 0 {
 		return nil
 	}

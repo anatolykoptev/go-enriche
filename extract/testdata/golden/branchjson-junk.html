@@ -1,0 +1,29 @@
+<!DOCTYPE html><html lang="ru"><head><title>Test clinic</title>
+<!--
+  REPRESENTATIVE (synthetic) — the branchJSON anti-fabrication golden. Models
+  a national-chain inline-script blob whose first object carries several
+  NON-phone-semantic numeric-string fields (id/lat/lng/timestamp) that must
+  NEVER be read as a phone candidate — only an explicit phone-semantic key
+  (phone/phoneLink/telephone/tel) is ever inspected, gate #1 of
+  branchJSONCandidates' three anti-fab gates (extract/branchjson.go). Note
+  "id":"84615384615" is DELIBERATELY an 11-digit string with a
+  Rossvyaz-valid area code (461) — it would PASS ValidatePhone if read as a
+  phone value, so this case specifically proves gate #1 (key-name gating)
+  does the work, not gate #3 (ValidatePhone) alone. The second object
+  carries a phone-KEYED field with an invalid value (too few digits) to
+  prove gate #3 still applies to a branch_json reading exactly as it does to
+  every other finder in this package. A THIRD object carries a legitimate,
+  valid phone-keyed value (555-66-77) — its presence in SiteNumbers is what
+  makes this a non-vacuous test: it proves branchJSONCandidates actually ran
+  over this fixture and read a value out, rather than the junk simply being
+  absent because the finder never executed at all. The array is wrapped in a
+  single-quoted JS STRING LITERAL (`var branches = '[...]'`), matching the
+  real mcmedok.ru marker_data shape branchJSONCandidates targets — a bare
+  (unwrapped) array/object literal is intentionally out of scope.
+-->
+</head><body>
+<div class="contacts"><a href="tel:+78121234567">+7 (812) 123-45-67</a></div>
+<script>
+var branches = '[{"id":"84615384615","lat":"59.9","lng":"30.4","timestamp":"1782286360180753"},{"id":"999","phone":"12345"},{"id":"3","phone":"+7 812 555-66-77"}]';
+</script>
+</body></html>
