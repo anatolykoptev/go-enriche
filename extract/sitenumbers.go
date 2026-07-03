@@ -78,11 +78,12 @@ type PhoneNumberFact struct {
 // than a second "contacts" literal — golangci-lint's goconst flags a fresh
 // constant that merely duplicates an existing one's value.
 const (
-	numSourceSocialLink = "social_link"
-	numSourceBranchJSON = "branch_json"
-	numSourceMicrodata  = "microdata"
-	numSourceBody       = "body"
-	numSourceDemoted    = "demoted"
+	numSourceSocialLink  = "social_link"
+	numSourceBranchJSON  = "branch_json"
+	numSourceSchemaPlace = "schema_place"
+	numSourceMicrodata   = "microdata"
+	numSourceBody        = "body"
+	numSourceDemoted     = "demoted"
 )
 
 // SiteNumberSources is every PhoneNumberFact.Source label this package can
@@ -95,6 +96,7 @@ const (
 var SiteNumberSources = []string{
 	numSourceSocialLink,
 	numSourceBranchJSON,
+	numSourceSchemaPlace,
 	regionContacts,
 	numSourceMicrodata,
 	numSourceBody,
@@ -109,6 +111,8 @@ func numberSourceForTier(tier int) string {
 		return numSourceSocialLink
 	case tierBranchJSON:
 		return numSourceBranchJSON
+	case tierSchemaPlace:
+		return numSourceSchemaPlace
 	case tierContacts:
 		return regionContacts
 	case tierMicrodata:
@@ -124,7 +128,7 @@ func numberSourceForTier(tier int) string {
 // PhoneNumberFact purposes — see PhoneNumberFact.Anchored's doc comment.
 func numberIsAnchored(tier int) bool {
 	switch tier {
-	case tierContacts, tierSocialLink, tierBranchJSON, tierMicrodata:
+	case tierContacts, tierSocialLink, tierBranchJSON, tierSchemaPlace, tierMicrodata:
 		return true
 	default:
 		return false
@@ -170,10 +174,12 @@ func CollectSiteNumbers(doc *goquery.Document, pagePoisoned bool) []PhoneNumberF
 	// regex-fallback / prose-only phone is never a member of this DOM-only
 	// set (see the doc comment above).
 	cands := collectPhoneCandidates(doc)
-	// branchJSONCandidates is unioned into the SiteNumbers SET ONLY — never
-	// into collectPhoneCandidates — so Facts.Phone/pickPhoneCandidate
-	// (contacts.go) stay byte-unchanged (see branchjson.go's doc comment).
+	// branchJSONCandidates and schemaPlaceCandidates are unioned into the
+	// SiteNumbers SET ONLY — never into collectPhoneCandidates — so
+	// Facts.Phone/pickPhoneCandidate (contacts.go) stay byte-unchanged (see
+	// branchjson.go's and schemaplace.go's doc comments).
 	cands = append(cands, branchJSONCandidates(doc)...)
+	cands = append(cands, schemaPlaceCandidates(doc)...)
 	if len(cands) == 0 {
 		return nil
 	}
