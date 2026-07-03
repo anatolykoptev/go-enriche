@@ -26,6 +26,15 @@ type Item struct {
 	Source  string // origin identifier
 	Topic   string // classification tag
 
+	// SkipMapsCheck is a verify-path lever — when true it suppresses the
+	// ModePlaces maps closure-check (checkMapsStatus / mapsChecker.Check).
+	// The maps result only feeds Facts.Phone (sourceMaps) and the closure
+	// status, neither of which a SiteNumbers-membership verifier reads, so a
+	// verify caller can skip the maps round-trip with no effect on its
+	// verdict. wp_enrich (ModePlaces) leaves it false — the maps-check still
+	// runs there. Default-false is byte-identical for every existing caller.
+	SkipMapsCheck bool
+
 	// Latitude and Longitude are authoritative coordinates provided by the
 	// discovery source (e.g. KudaGo). When both are non-nil they take
 	// precedence over any coords resolved by the maps checker or geocoder.
