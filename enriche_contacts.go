@@ -2,6 +2,7 @@ package enriche
 
 import (
 	"context"
+	"time"
 
 	"github.com/anatolykoptev/go-enriche/extract"
 )
@@ -211,7 +212,9 @@ func rawContactsSufficient(rawFacts extract.Facts, siteNumbers []extract.PhoneNu
 // need not re-parse the same page — the contacts-leg reuse mirror of
 // homeSiteNumbersFor on the homepage leg.
 func (e *Enricher) fetchContactsHTML(ctx context.Context, contactsURL string, item Item) (html string, rawPoisoned, renderSkipped bool, siteNumbers []extract.PhoneNumberFact) {
+	contactsFetchStart := time.Now()
 	fr := e.fetchWithRetry(ctx, contactsURL)
+	e.metrics.phaseTiming(PhaseContactsFetch, time.Since(contactsFetchStart).Seconds())
 	var rawHTML string
 	if fr != nil && fr.Status == StatusActive {
 		rawHTML = fr.HTML
@@ -272,7 +275,9 @@ func (e *Enricher) fetchContactsHTML(ctx context.Context, contactsURL string, it
 		return rawHTML, rawPoisoned, false, rawSiteNumbers
 	}
 
+	contactsRenderStart := time.Now()
 	rendered, err := e.browserFetch(ctx, contactsURL)
+	e.metrics.phaseTiming(PhaseContactsRender, time.Since(contactsRenderStart).Seconds())
 	if err != nil || len(rendered) < minRenderShellBytes {
 		// Render ATTEMPTED-BUT-FAILED (error or a bot-protection shell too short
 		// to adopt) — degrade to the raw fetch, never adopt the shell. The result
