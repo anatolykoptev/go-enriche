@@ -88,7 +88,29 @@ type Metrics struct {
 	// sites all mean "a render happened") so overloading it can never corrupt the
 	// render-avoidance-rate signal (enrich_browser_render_skipped_total{leg,reason}).
 	OnBrowserRenderSkipped func(leg, reason string)
+
+	// OnPhaseTiming fires once per instrumented enrichment phase with the phase
+	// name (one of the Phase* consts) and its wall-clock duration in seconds.
+	// Phases: homepage_fetch / homepage_render / contacts_fetch / contacts_render
+	// (each emitted only when that leg actually runs) and total (the whole
+	// Enrich() wall-clock, recorded even on a cache-hit early return). Lets the
+	// consumer build a per-phase latency histogram (e.g.
+	// gowp_wp_enrich_phase_seconds{phase}) to see WHERE enrich time goes. The
+	// maps-check leg is intentionally NOT timed here — it has its own
+	// gowp_wp_enrich_maps_check_seconds and is skipped on the verify path.
+	OnPhaseTiming func(phase string, seconds float64)
 }
+
+// Phase names emitted through Metrics.OnPhaseTiming. Exported so a consumer's
+// histogram labels (gowp_wp_enrich_phase_seconds{phase}) share one vocabulary
+// with the emitter and cannot drift.
+const (
+	PhaseHomepageFetch  = "homepage_fetch"
+	PhaseHomepageRender = "homepage_render"
+	PhaseContactsFetch  = "contacts_fetch"
+	PhaseContactsRender = "contacts_render"
+	PhaseTotal          = "total"
+)
 
 func (m *Metrics) cacheHit() {
 	if m != nil && m.OnCacheHit != nil {
@@ -177,5 +199,11 @@ func (m *Metrics) targetBlocked(site string) {
 func (m *Metrics) browserRenderSkipped(leg, reason string) {
 	if m != nil && m.OnBrowserRenderSkipped != nil && leg != "" && reason != "" {
 		m.OnBrowserRenderSkipped(leg, reason)
+	}
+}
+
+func (m *Metrics) phaseTiming(phase string, seconds float64) {
+	if m != nil && m.OnPhaseTiming != nil && phase != "" {
+		m.OnPhaseTiming(phase, seconds)
 	}
 }

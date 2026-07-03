@@ -43,7 +43,9 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 		}()
 	}
 
+	homeFetchStart := time.Now()
 	fr := e.fetchWithRetry(ctx, item.URL)
+	e.metrics.phaseTiming(PhaseHomepageFetch, time.Since(homeFetchStart).Seconds())
 	if fr == nil { //nolint:nestif // pre-existing nested fetch-error handling
 		// If ox-browser is running, wait for it — it may have succeeded.
 		if oxCh != nil {
@@ -176,7 +178,9 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 	}
 	if shouldRenderHomepage {
 		reason := renderReason(thinContent)
+		homeRenderStart := time.Now()
 		rendered, err := e.browserFetch(ctx, item.URL)
+		e.metrics.phaseTiming(PhaseHomepageRender, time.Since(homeRenderStart).Seconds())
 		switch {
 		case err == nil && len(rendered) >= minRenderShellBytes:
 			e.metrics.browserRender(reason)

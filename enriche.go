@@ -106,6 +106,11 @@ func New(opts ...Option) *Enricher {
 // collapses the former two independent fact writers (the maps merge and the
 // wholesale site-extraction assign) into a single authority — see resolve.go.
 func (e *Enricher) Enrich(ctx context.Context, item Item) (*Result, error) {
+	// Total wall-clock for the whole Enrich() call. Deferred at the very top so
+	// it records even a cache-hit early return. See Metrics.OnPhaseTiming.
+	t0 := time.Now()
+	defer func() { e.metrics.phaseTiming(PhaseTotal, time.Since(t0).Seconds()) }()
+
 	result := &Result{
 		Name: item.Name,
 		URL:  item.URL,
