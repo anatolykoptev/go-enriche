@@ -141,7 +141,25 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 	// shells whose nav links only exist post-render), else the raw HTML.
 	discoveryHTML := fr.HTML
 	thinContent := len([]rune(result.Content)) < minExtractChars
-	shouldRenderHomepage := e.browserFetch != nil && (thinContent || !hasContactFacts(rawFacts))
+	// rawSiteNumbers is the raw homepage's full candidate phone-number SET,
+	// collected ONCE here on fr.HTML BEFORE the render decision and reused as the
+	// SiteNumbers accumulator input when no render is adopted (homeSiteNumbersFor)
+	// so the raw page is parsed for numbers exactly once.
+	rawSiteNumbers := extract.CollectSiteNumbersHTML(fr.HTML, homeRawPoisoned)
+	// rawSufficient: the raw fetch already yields the contact data a render would
+	// surface — either a single-winner Facts contact (the pre-existing no-render
+	// case) OR a trustworthy anchored site number (branch_json/schema_place,
+	// invisible to hasContactFacts). The trust-gated arm is fail-closed: any
+	// poison signal forces homeRawPoisoned=true and the render always fires (see
+	// rawContactsSufficient). thinContent stays an INDEPENDENT OR — a genuinely
+	// thin page always renders regardless of SiteNumbers.
+	rawSufficient := rawContactsSufficient(rawFacts, rawSiteNumbers, homeRawPoisoned)
+	shouldRenderHomepage := e.browserFetch != nil && (thinContent || !rawSufficient)
+	// Record the trust-gated render-skip (provenance flag + per-leg counter) when
+	// the render the OLD gate WOULD have fired (absent contacts, non-thin) was
+	// avoided by a trustworthy anchored raw number — all branching lives in the
+	// helper, not this F-graded orchestrator (ADR-5 complexity ceiling).
+	e.noteHomepageRenderSkip(result, e.browserFetch != nil, thinContent, hasContactFacts(rawFacts), rawSufficient)
 	if shouldRenderHomepage {
 		// item.URL is caller-supplied (e.g. an advertiser website field) and
 		// browserFetch dispatches it to an out-of-process render service
@@ -222,7 +240,7 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 	// the Facts.Phone carry-forward in the render block above, and
 	// fetchContactsHTML's rawPoisoned in enriche_contacts.go (contacts-page
 	// mirror).
-	homeSiteNumbers := extract.CollectSiteNumbersHTML(siteHTML, homeRawPoisoned)
+	homeSiteNumbers := homeSiteNumbersFor(rawSiteNumbers, fr.HTML, siteHTML, homeRawPoisoned)
 	r.addSiteNumbers(homeSiteNumbers, item.City)
 
 	// Contacts-subpage discovery: the homepage often links a dedicated /contacts
@@ -389,6 +407,37 @@ func contactFactCount(f extract.Facts) int {
 		n++
 	}
 	return n
+}
+
+// homeSiteNumbersFor returns the SiteNumbers set for siteHTML, reusing the
+// pre-hoisted rawSiteNumbers (collected once on the raw HTML) when a render was
+// NOT adopted (siteHTML is still the raw HTML — the no-render / render-skip
+// case), so the raw page is parsed for numbers exactly once. When a render WAS
+// adopted (siteHTML is the rendered DOM), it re-collects from that DOM with the
+// raw poison verdict carried forward — identical to the pre-hoist unconditional
+// collection at the SiteNumbers accumulator call site.
+func homeSiteNumbersFor(rawSiteNumbers []extract.PhoneNumberFact, rawHTML, siteHTML string, poisoned bool) []extract.PhoneNumberFact {
+	if siteHTML == rawHTML {
+		return rawSiteNumbers
+	}
+	return extract.CollectSiteNumbersHTML(siteHTML, poisoned)
+}
+
+// noteHomepageRenderSkip records the trust-gated homepage render-skip — the
+// RenderSkipped provenance flag on result plus the OnBrowserRenderSkipped
+// per-leg counter — when a render the OLD escalation gate would have fired
+// (absent contacts on a non-thin page) was avoided because the raw fetch
+// already carried a trustworthy anchored number (rawSufficient with no Facts
+// contact). A thin-content render is never a trust-skip (the content still
+// needs the render); a page that already had a Facts contact never rendered
+// under the old gate either — neither is flagged. Isolating this branching here
+// keeps it out of the F-graded fetchAndExtract orchestrator (ADR-5).
+func (e *Enricher) noteHomepageRenderSkip(result *Result, canRender, thinContent, hasFacts, rawSufficient bool) {
+	if !canRender || thinContent || hasFacts || !rawSufficient {
+		return
+	}
+	result.RenderSkipped = true
+	e.metrics.browserRenderSkipped(renderSkipLegHomepage, renderSkipReasonRawSufficient)
 }
 
 // needsGoqueryFallback checks if goquery extraction should be attempted.

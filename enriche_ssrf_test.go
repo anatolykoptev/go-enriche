@@ -108,7 +108,7 @@ func TestFetchContactsHTML_BlocksInternalRenderTarget(t *testing.T) {
 		return renderedWithContacts, nil // would succeed if the guard failed to block
 	}))
 
-	html, poisoned := e.fetchContactsHTML(context.Background(), "http://169.254.169.254/contacts", Item{City: "Санкт-Петербург"})
+	html, poisoned, _ := e.fetchContactsHTML(context.Background(), "http://169.254.169.254/contacts", Item{City: "Санкт-Петербург"})
 	if rendered.Load() {
 		t.Fatal("browserFetch fired for an internal contactsURL target — checkTarget failed to gate it")
 	}

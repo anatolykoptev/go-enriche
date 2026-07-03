@@ -85,6 +85,16 @@ type Result struct {
 	// instead of reading it as WRONG. Read-only sidecar: it never feeds
 	// Facts.Phone. nil when the site fetch found no phone candidate at all.
 	SiteNumbers []extract.PhoneNumberFact
+
+	// RenderSkipped is true when a headless-browser render the OLD escalation
+	// gate would have fired was SKIPPED because the raw fetch already carried a
+	// trustworthy anchored site number (see rawContactsSufficient). Additive
+	// provenance sidecar consumed by go-wp's verify Correctable gate: a
+	// wrong-verdict correction that rests on a render-skipped single-source-raw
+	// value is forced NON-auto-applicable (human-confirm) so a false-negative
+	// skip can never auto-publish a laundered number to a paid card. Zero value
+	// (false) = a render happened or none was avoidable.
+	RenderSkipped bool
 }
 
 // FieldProvenance is the resolved provenance of one fact: the winning source

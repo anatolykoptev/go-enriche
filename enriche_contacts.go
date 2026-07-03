@@ -60,7 +60,10 @@ func (e *Enricher) resolveContactsPage(ctx context.Context, item Item, result *R
 	e.metrics.contactsPageDiscovered()
 	e.logger.DebugContext(ctx, "enriche: contacts page discovered", "name", item.Name, "url", contactsURL)
 
-	contactsHTML, rawPoisoned := e.fetchContactsHTML(ctx, contactsURL, item)
+	contactsHTML, rawPoisoned, contactsRenderSkipped := e.fetchContactsHTML(ctx, contactsURL, item)
+	if contactsRenderSkipped {
+		result.RenderSkipped = true
+	}
 	if contactsHTML == "" {
 		return
 	}
@@ -147,6 +150,35 @@ func hasAnchoredSiteNumber(siteNumbers []extract.PhoneNumberFact) bool {
 	return false
 }
 
+// Render-skip signal labels: leg (which fetch leg skipped) and reason (why the
+// skip was safe), shared by the homepage (fetchAndExtract) and contacts
+// (fetchContactsHTML) legs and the OnBrowserRenderSkipped counter.
+const (
+	renderSkipReasonRawSufficient = "raw_sufficient"
+	renderSkipLegHomepage         = "homepage"
+	renderSkipLegContacts         = "contacts"
+)
+
+// rawContactsSufficient is the SINGLE render-skip predicate shared by BOTH fetch
+// legs — fetchAndExtract's homepage render and fetchContactsHTML's contacts-
+// subpage render: the raw fetch already yields the contact data a (15-30s)
+// headless render would surface, so the render is unnecessary. True when EITHER
+// the raw HTML already carried a single-winner structured contact fact
+// (hasContactFacts — the pre-existing no-render case) OR it carried a
+// TRUSTWORTHY ANCHORED site number: a non-poisoned page (!poisoned) with at
+// least one anchored candidate (hasAnchoredSiteNumber). The anchored arm is
+// PROVABLY fail-closed: dniTrustworthy marks an anchored candidate Trustworthy
+// exactly when the page is non-DNI, and poisoned already OR-folds HasDNIVendor
+// (homeRawPoisoned / rawPoisoned), so "!poisoned && anchored" is equivalent to
+// "a Trustworthy anchored raw number exists" — any poison signal forces
+// poisoned=true, the anchored arm goes false, and the render always fires.
+// Factored into ONE definition (the fitness test asserts the poisoned+anchored
+// composite lives here alone) so the two legs can never diverge and launder a
+// number through one of them.
+func rawContactsSufficient(rawFacts extract.Facts, siteNumbers []extract.PhoneNumberFact, poisoned bool) bool {
+	return hasContactFacts(rawFacts) || (!poisoned && hasAnchoredSiteNumber(siteNumbers))
+}
+
 // fetchContactsHTML returns the best available HTML for the contacts page plus
 // the RAW fetch's DNI verdict (rawPoisoned). The HTML is the raw fast fetch,
 // upgraded to the rendered DOM when the raw page is thin or carries no contact
@@ -158,7 +190,7 @@ func hasAnchoredSiteNumber(siteNumbers []extract.PhoneNumberFact) bool {
 // separately so the caller can carry it forward even when a (clean-looking)
 // render replaces the fact-set — a render must never launder a rotating proxy by
 // hiding the call-tracking widget the raw markup exposed.
-func (e *Enricher) fetchContactsHTML(ctx context.Context, contactsURL string, item Item) (html string, rawPoisoned bool) {
+func (e *Enricher) fetchContactsHTML(ctx context.Context, contactsURL string, item Item) (html string, rawPoisoned, renderSkipped bool) {
 	fr := e.fetchWithRetry(ctx, contactsURL)
 	var rawHTML string
 	if fr != nil && fr.Status == StatusActive {
@@ -184,10 +216,25 @@ func (e *Enricher) fetchContactsHTML(ctx context.Context, contactsURL string, it
 	// than the homepage — it is the canonical contact source, so a contactless
 	// raw contacts page is the strongest signal the contacts are JS-injected.
 	if e.browserFetch == nil {
-		return rawHTML, rawPoisoned
+		return rawHTML, rawPoisoned, false
 	}
-	if rawHTML != "" && hasContactFacts(rawFacts) {
-		return rawHTML, rawPoisoned // raw already carries contacts — no render needed
+	// Skip the (15-30s) contacts render when the raw contacts page is already
+	// contacts-sufficient — the SAME shared predicate the homepage leg uses
+	// (rawContactsSufficient), so the two render legs can never diverge. The
+	// trust-gated arm (a non-poisoned anchored SiteNumber with no single-winner
+	// Facts contact — a branch_json/schema_place number invisible to
+	// hasContactFacts) is the new render-avoidance; the hasContactFacts arm is
+	// the pre-existing skip (which never rendered, so it is NOT flagged as a new
+	// skip).
+	if rawHTML != "" {
+		rawSiteNumbers := extract.CollectSiteNumbersHTML(rawHTML, rawPoisoned)
+		if rawContactsSufficient(rawFacts, rawSiteNumbers, rawPoisoned) {
+			skipped := !hasContactFacts(rawFacts)
+			if skipped {
+				e.metrics.browserRenderSkipped(renderSkipLegContacts, renderSkipReasonRawSufficient)
+			}
+			return rawHTML, rawPoisoned, skipped
+		}
 	}
 
 	// This render fires whenever the raw contacts fetch was thin/contactless —
@@ -199,7 +246,7 @@ func (e *Enricher) fetchContactsHTML(ctx context.Context, contactsURL string, it
 	if err := e.checkTarget(ctx, contactsURL); err != nil {
 		e.metrics.targetBlocked("contacts_page_render")
 		e.logger.DebugContext(ctx, "enriche: contacts page render target blocked", "url", contactsURL, "err", err)
-		return rawHTML, rawPoisoned
+		return rawHTML, rawPoisoned, false
 	}
 
 	rendered, err := e.browserFetch(ctx, contactsURL)
@@ -209,13 +256,13 @@ func (e *Enricher) fetchContactsHTML(ctx context.Context, contactsURL string, it
 		e.metrics.browserRenderError()
 		e.logger.DebugContext(ctx, "enriche: contacts page render failed/shell",
 			"url", contactsURL, "rendered_bytes", len(rendered), "err", err)
-		return rawHTML, rawPoisoned
+		return rawHTML, rawPoisoned, false
 	}
 	e.metrics.browserRender("contacts_page")
 	// Adopt the render only if it yields more contact facts than the raw page.
 	renderedFacts := extract.ExtractFactsForCity(rendered, contactsURL, item.City)
 	if contactFactCount(renderedFacts) > contactFactCount(rawFacts) {
-		return rendered, rawPoisoned
+		return rendered, rawPoisoned, false
 	}
-	return rawHTML, rawPoisoned
+	return rawHTML, rawPoisoned, false
 }
