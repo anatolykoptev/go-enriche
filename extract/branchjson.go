@@ -6,11 +6,10 @@ import (
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
-	kitllm "github.com/anatolykoptev/go-kit/llm"
 )
 
 // maxBranchScriptBytes bounds a single inline <script> element's text before
-// any JSON isolation/parse is attempted — mirrors the root package's
+// any literal-isolation/parse is attempted — mirrors the root package's
 // WithMaxContentLen size-bound convention (options.go), scaled for a raw
 // script payload rather than extracted prose. A script whose text exceeds
 // this is SKIPPED entirely, not truncated: truncating mid-JSON would only
@@ -65,22 +64,34 @@ var branchPhoneKeys = []string{"phone", "phoneLink", "telephone", "tel"}
 //     this package obeys — an invalid-looking "phone" field is dropped, not
 //     coerced.
 //
-// JSON isolation REUSES kitllm.ExtractJSON (go-kit/llm, already a
-// go-enriche dependency) — no bespoke bracket scanner. A single inline
-// <script> on a real page routinely bundles MULTIPLE JS statements (e.g.
-// mcmedok.ru's script carries both the `marker_data = '[...]'` assignment
-// AND a trailing `var region = {...}` object in the SAME <script> tag);
-// handing ExtractJSON the WHOLE script text lets its earliest-opener/
-// latest-closer heuristic over-capture from the first statement's bracket
-// all the way through the LAST one, yielding invalid JSON that fails to
-// parse. So the script text is first split on ';' — the plain JS statement
-// separator, NOT a JSON-aware split — and ExtractJSON runs once per
-// statement-shaped segment instead of once per whole script. This adds zero
-// bracket-counting/JSON-structure logic of our own: ExtractJSON remains the
-// sole JSON-isolation primitive, merely fed a narrower input. On a segment
-// ExtractJSON can't cleanly isolate (an exotic shape with a literal ';'
-// inside a string value, e.g.), json.Unmarshal fails and that segment
-// yields zero candidates — a fail-closed MISS, never a fabrication.
+// JSON isolation is a small LOCAL string-literal unwrap
+// (jsStringLiteralAssignments below) — NOT a bracket/brace scanner: it
+// locates a `var X = '...'` / `= "..."` JS string-literal ASSIGNMENT by
+// quote-matching (backslash-escape-aware, to find the correct closing
+// quote), unescapes only the wrapping quote's own escape (\' inside a
+// '...'-wrapped literal, or \" inside a "..."-wrapped one — every other
+// backslash sequence, \uXXXX / \/ / \\ / \n / \t / \r, is ALREADY valid JSON
+// string-escape syntax and is left for json.Unmarshal to decode natively),
+// then json.Unmarshal's the isolated content. This naturally handles a
+// <script> that bundles MULTIPLE JS statements in one tag (e.g.
+// mcmedok.ru's script carries both `marker_data = '[...]'` AND a trailing
+// `var region = {...}` — a BARE object literal, not string-wrapped, so it
+// is never even considered): each `= '...'`-wrapped literal is isolated
+// independently by its own matching quotes, so one statement's content can
+// never bleed into another's the way a whole-script bracket-matching
+// heuristic would. This is a deliberately NARROWER target than "any
+// bracketed JSON on the page" — it only reads JSON that was serialized
+// (server-side, typically json_encode()) INTO a JS string literal, which is
+// exactly the real-world branch-locator shape; a bare, hand-written JS
+// object/array literal is out of scope (YAGNI absent a real fixture of that
+// shape).
+//
+// Only scripts with no `type` attribute (the HTML default) or an explicit
+// text/javascript / application/javascript type are scanned — a
+// schema.org <script type="application/ld+json"> or a raw
+// application/json data island is Phase-2's domain (structured.Places()),
+// never branchJSON's, even on the rare occasion its content would otherwise
+// pass every anti-fab gate (see isJSExecutableScript).
 //
 // branch_json is a non-visible-DOM source class: a wrong number in a hidden
 // script blob has no visible-page tell the way a wrong tel: link would.
@@ -96,26 +107,11 @@ func branchJSONCandidates(doc *goquery.Document) []phoneCandidate {
 	var out []phoneCandidate
 	capped := false
 	doc.Find("script").EachWithBreak(func(_ int, s *goquery.Selection) bool {
-		if _, hasSrc := s.Attr("src"); hasSrc {
-			return true // an external script has no inline JSON to read
-		}
-		text := s.Text()
-		if len(text) == 0 || len(text) > maxBranchScriptBytes {
+		if !isCandidateScript(s) {
 			return true
 		}
-		for _, stmt := range strings.Split(text, ";") {
-			if !strings.ContainsAny(stmt, "{[") {
-				continue // no bracket at all — not worth an ExtractJSON call
-			}
-			for _, c := range branchStatementCandidates(stmt) {
-				out = append(out, c)
-				if len(out) >= maxBranchCandidates {
-					capped = true
-					return false
-				}
-			}
-		}
-		return true
+		out, capped = appendScriptCandidates(out, s.Text())
+		return !capped
 	})
 	if capped {
 		slog.Warn("extract: branchJSONCandidates candidate cap tripped", "cap", maxBranchCandidates)
@@ -123,17 +119,143 @@ func branchJSONCandidates(doc *goquery.Document) []phoneCandidate {
 	return out
 }
 
-// branchStatementCandidates isolates and parses ONE ';'-delimited JS
-// statement's JSON literal (via kitllm.ExtractJSON) and reads phone-keyed
-// fields at a single flat level. Returns nil on any isolation/parse/shape
-// failure — fail-closed, never a fabrication.
-func branchStatementCandidates(stmt string) []phoneCandidate {
-	extracted := kitllm.ExtractJSON(stmt)
-	if extracted == "" {
-		return nil
+// isCandidateScript reports whether a <script> element is even worth
+// scanning: no `src` attribute (an external script has no inline JSON to
+// read) and JS-executable per isJSExecutableScript (a schema.org/data-
+// island script is Phase-2's domain, not ours).
+func isCandidateScript(s *goquery.Selection) bool {
+	if _, hasSrc := s.Attr("src"); hasSrc {
+		return false
 	}
+	return isJSExecutableScript(s)
+}
+
+// appendScriptCandidates scans one script's text for JS string-literal
+// assignments (jsStringLiteralAssignments) and appends every harvested
+// candidate to out, stopping as soon as maxBranchCandidates is reached.
+// Returns the updated slice and whether the cap was tripped on this call —
+// the caller uses that to stop scanning further scripts.
+func appendScriptCandidates(out []phoneCandidate, text string) ([]phoneCandidate, bool) {
+	if len(text) == 0 || len(text) > maxBranchScriptBytes {
+		return out, false
+	}
+	for _, literal := range jsStringLiteralAssignments(text) {
+		if !looksJSONish(literal) {
+			continue
+		}
+		for _, c := range branchLiteralCandidates(literal) {
+			out = append(out, c)
+			if len(out) >= maxBranchCandidates {
+				return out, true
+			}
+		}
+	}
+	return out, false
+}
+
+// isJSExecutableScript reports whether s is a JS-execution <script> —
+// either no type attribute (the HTML default) or an explicit
+// text/javascript / application/javascript type — as opposed to a
+// schema.org JSON-LD block (application/ld+json), a raw JSON data island
+// (application/json), an import map, or any other non-executable script
+// payload. Only a JS-execution script can plausibly carry a `var X = '...'`
+// string-literal assignment; a JSON-typed script is Phase-2's domain
+// (structured.Places()) regardless of whether its content happens to carry
+// a clean "telephone" field that would otherwise pass every anti-fab gate.
+func isJSExecutableScript(s *goquery.Selection) bool {
+	t, ok := s.Attr("type")
+	if !ok {
+		return true
+	}
+	t = strings.ToLower(strings.TrimSpace(t))
+	return t == "" || t == "text/javascript" || t == "application/javascript"
+}
+
+// looksJSONish is a cheap pre-check so branchLiteralCandidates only attempts
+// json.Unmarshal on a literal that could plausibly be JSON — the first
+// non-space byte is '{' or '['. Not a validity check: a literal that passes
+// this can still fail json.Unmarshal (fail-closed miss), and one that fails
+// it is skipped without ever attempting a parse.
+func looksJSONish(s string) bool {
+	s = strings.TrimSpace(s)
+	return len(s) > 0 && (s[0] == '{' || s[0] == '[')
+}
+
+// jsStringLiteralAssignments scans script text for `= '...'` / `= "..."`
+// JS string-literal assignments (an `=` followed by optional whitespace and
+// an opening quote) and returns each literal's content, delimiter-
+// unescaped only (see unescapeJSStringDelimiter). This is a plain JS
+// STRING-LITERAL scan — quote-matching with backslash-escape awareness to
+// find the correct closing quote — NOT a JSON/bracket scanner: it has zero
+// knowledge of {}/[] structure and never balances braces.
+func jsStringLiteralAssignments(text string) []string {
+	var out []string
+	i := 0
+	for i < len(text) {
+		eq := strings.IndexByte(text[i:], '=')
+		if eq < 0 {
+			break
+		}
+		eq += i
+		j := eq + 1
+		for j < len(text) && isJSSpace(text[j]) {
+			j++
+		}
+		if j >= len(text) || (text[j] != '\'' && text[j] != '"') {
+			i = eq + 1
+			continue
+		}
+		quote := text[j]
+		k := j + 1
+		for k < len(text) {
+			if text[k] == '\\' {
+				k += 2
+				continue
+			}
+			if text[k] == quote {
+				break
+			}
+			k++
+		}
+		if k >= len(text) {
+			break // unterminated literal — stop scanning this script
+		}
+		out = append(out, unescapeJSStringDelimiter(text[j+1:k], quote))
+		i = k + 1
+	}
+	return out
+}
+
+// isJSSpace reports whether b is JS whitespace between `=` and the string
+// literal that follows it.
+func isJSSpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
+}
+
+// unescapeJSStringDelimiter undoes ONLY the escaping a template engine adds
+// to protect the wrapping quote character (e.g. \' inside a '...'-wrapped
+// literal, so an apostrophe in a real address like "O'Brien" doesn't
+// terminate the JS string early). Every other backslash escape (\uXXXX,
+// \/, \\, \n, \t, \r, the OTHER quote character, …) is left untouched
+// because it is ALSO valid JSON string-escape syntax, which json.Unmarshal
+// decodes natively — touching it here would risk double-unescaping.
+// Content that turns out not to be JSON at all simply fails json.Unmarshal
+// downstream — fail-closed, never fabricated.
+func unescapeJSStringDelimiter(s string, quote byte) string {
+	esc := "\\" + string(quote)
+	if !strings.Contains(s, esc) {
+		return s
+	}
+	return strings.ReplaceAll(s, esc, string(quote))
+}
+
+// branchLiteralCandidates parses ONE already-isolated, delimiter-unescaped
+// JSON literal and reads phone-keyed fields at a single flat level.
+// Returns nil on any parse/shape failure — fail-closed, never a
+// fabrication.
+func branchLiteralCandidates(literal string) []phoneCandidate {
 	var raw any
-	if err := json.Unmarshal([]byte(extracted), &raw); err != nil {
+	if err := json.Unmarshal([]byte(literal), &raw); err != nil {
 		return nil
 	}
 	switch v := raw.(type) {

@@ -16,11 +16,14 @@
   valid phone-keyed value (555-66-77) — its presence in SiteNumbers is what
   makes this a non-vacuous test: it proves branchJSONCandidates actually ran
   over this fixture and read a value out, rather than the junk simply being
-  absent because the finder never executed at all.
+  absent because the finder never executed at all. The array is wrapped in a
+  single-quoted JS STRING LITERAL (`var branches = '[...]'`), matching the
+  real mcmedok.ru marker_data shape branchJSONCandidates targets — a bare
+  (unwrapped) array/object literal is intentionally out of scope.
 -->
 </head><body>
 <div class="contacts"><a href="tel:+78121234567">+7 (812) 123-45-67</a></div>
 <script>
-var branches = [{"id":"84615384615","lat":"59.9","lng":"30.4","timestamp":"1782286360180753"},{"id":"999","phone":"12345"},{"id":"3","phone":"+7 812 555-66-77"}];
+var branches = '[{"id":"84615384615","lat":"59.9","lng":"30.4","timestamp":"1782286360180753"},{"id":"999","phone":"12345"},{"id":"3","phone":"+7 812 555-66-77"}]';
 </script>
 </body></html>

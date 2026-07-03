@@ -10,12 +10,14 @@
   DNI-immunity is never stripped by the weaker branch_json reading of the
   identical digits. The page also runs a real DNI vendor signature
   (window.roistatProjectId) so dniTrustworthy's page-level fail-closed gate
-  is actually exercised, not merely assumed absent.
+  is actually exercised, not merely assumed absent. The branch array is
+  wrapped in a single-quoted JS STRING LITERAL, matching the real
+  mcmedok.ru marker_data shape branchJSONCandidates targets.
 -->
 <script>window.roistatProjectId = "12345";</script>
 </head><body>
 <div class="contacts"><a href="https://wa.me/79210001122">WhatsApp</a></div>
 <script>
-var branches = [{"id":"1","phone":"+7 921 000-11-22","region":"spb"}];
+var branches = '[{"id":"1","phone":"+7 921 000-11-22","region":"spb"}]';
 </script>
 </body></html>

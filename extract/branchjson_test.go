@@ -207,8 +207,8 @@ func TestBranchJSONCandidates_OversizedScriptSkipped(t *testing.T) {
 	t.Parallel()
 	filler := strings.Repeat("x", maxBranchScriptBytes+1024)
 	html := `<html><body>` +
-		`<script>var branches = [{"phone":"+78121234567","note":"` + filler + `"}];</script>` +
-		`<script>var other = [{"phone":"+7 812 999-88-77"}];</script>` +
+		`<script>var branches = '[{"phone":"+78121234567","note":"` + filler + `"}]';</script>` +
+		`<script>var other = '[{"phone":"+7 812 999-88-77"}]';</script>` +
 		`</body></html>`
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
@@ -237,7 +237,7 @@ func TestBranchJSONCandidates_OversizedScriptSkipped(t *testing.T) {
 func TestBranchJSONCandidates_CandidateCapTripped(t *testing.T) {
 	t.Parallel()
 	var b strings.Builder
-	b.WriteString(`<html><body><script>var branches = [`)
+	b.WriteString(`<html><body><script>var branches = '[`)
 	const total = 250
 	for i := 0; i < total; i++ {
 		if i > 0 {
@@ -246,7 +246,7 @@ func TestBranchJSONCandidates_CandidateCapTripped(t *testing.T) {
 		// 7-digit suffix keeps every number well-formed (7 + area 812 + 7 = 11 digits).
 		b.WriteString(`{"phone":"+7 812 ` + zeroPad(i, 7) + `"}`)
 	}
-	b.WriteString(`];</script></body></html>`)
+	b.WriteString(`]';</script></body></html>`)
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(b.String()))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -264,4 +264,78 @@ func zeroPad(i, width int) string {
 		s = "0" + s
 	}
 	return s
+}
+
+// --- Fix 2 (pr-review-council MEDIUM finding on PR #30): schema.org
+// JSON-LD / raw JSON data-island scripts must never be tagged branch_json.
+// ---
+
+// TestCollectSiteNumbers_JSONLD_NeverTaggedBranchJSON is the council-
+// requested golden (testdata/golden/branchjson-jsonld-skip.html): a
+// standard <script type="application/ld+json"> LocalBusiness block with a
+// clean "telephone" field must NEVER surface as Source=branch_json — that
+// is Phase-2's domain (structured.Places()), not this finder's, even
+// though the field would otherwise pass every anti-fab gate.
+//
+// NOTE ON RED-ON-REVERT SCOPE: this fixture is a REALISTIC bare JSON-LD
+// object (no `var X =` wrapper — real ld+json is never JS-assignment-
+// wrapped, since a crawler must read the script's raw text AS JSON). Under
+// the local string-literal unwrap (branchjson.go), a bare object is
+// ALREADY structurally excluded by jsStringLiteralAssignments regardless of
+// the type filter (JSON-LD has no `=` sign at all — JSON uses `:`). So this
+// specific golden's GREEN result is not, by itself, sensitive to reverting
+// isJSExecutableScript alone; see TestIsJSExecutableScript below for that
+// filter's own genuinely RED-on-revert, isolated coverage. This golden
+// still stands as the real-world regression guard the council asked for.
+func TestCollectSiteNumbers_JSONLD_NeverTaggedBranchJSON(t *testing.T) {
+	t.Parallel()
+	doc := docFromFixture(t, "branchjson-jsonld-skip.html")
+
+	if got := branchJSONCandidates(doc); len(got) != 0 {
+		t.Fatalf("branchJSONCandidates(doc) = %+v, want empty (JSON-LD is Phase-2's domain)", got)
+	}
+
+	nums := CollectSiteNumbers(doc, false)
+	for _, n := range nums {
+		if n.Source == numSourceBranchJSON {
+			t.Errorf("SiteNumbers entry %+v tagged Source=branch_json — a JSON-LD telephone must never carry this Source", n)
+		}
+	}
+}
+
+// TestIsJSExecutableScript is the Fix 2 predicate's own isolated,
+// genuinely RED-on-revert unit test: reverting isJSExecutableScript to
+// "always true" (i.e. deleting the type check) flips the ld+json/
+// application-json cases below to true, failing this test directly —
+// independent of whether any particular fixture's script shape happens to
+// also be excluded by the string-literal-assignment requirement (Fix 1).
+func TestIsJSExecutableScript(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		html string
+		want bool
+	}{
+		{"no type attribute", `<script>var x=1;</script>`, true},
+		{"text/javascript", `<script type="text/javascript">var x=1;</script>`, true},
+		{"application/javascript", `<script type="application/javascript">var x=1;</script>`, true},
+		{"TEXT/JAVASCRIPT uppercase", `<script type="TEXT/JAVASCRIPT">var x=1;</script>`, true},
+		{"application/ld+json", `<script type="application/ld+json">{}</script>`, false},
+		{"application/json", `<script type="application/json">{}</script>`, false},
+		{"module", `<script type="module">var x=1;</script>`, false},
+		{"importmap", `<script type="importmap">{}</script>`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(tc.html))
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			s := doc.Find("script").First()
+			if got := isJSExecutableScript(s); got != tc.want {
+				t.Errorf("isJSExecutableScript(%s) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
 }
