@@ -85,6 +85,22 @@ type Result struct {
 	// instead of reading it as WRONG. Read-only sidecar: it never feeds
 	// Facts.Phone. nil when the site fetch found no phone candidate at all.
 	SiteNumbers []extract.PhoneNumberFact
+
+	// RenderSkipped is true when the result rests on the RAW fetch ONLY, with NO
+	// successful render corroboration — EITHER the escalation render was
+	// intentionally SKIPPED because the raw fetch already carried a trustworthy
+	// anchored site number (see rawContactsSufficient), OR a render was ATTEMPTED
+	// but FAILED / returned a sub-minRenderShellBytes shell and degraded back to
+	// raw. Both land on the same single-source-raw data, so the flag marks both.
+	// Additive provenance sidecar, NOT yet wired to any reader (like SiteNumbers):
+	// it is EMITTED for a go-wp Phase-1.5 Correctable gate (to be wired at go-wp
+	// verify.go's classifyContactVerdict/Correctable) that will force a
+	// wrong-verdict correction resting on a render-skipped single-source-raw value
+	// to be NON-auto-applicable (human-confirm), so a false-negative skip cannot
+	// auto-publish a laundered number to a paid card. This code does NOT yet
+	// enforce that property. Zero value (false) = a successful render corroborated
+	// the page (or none was avoidable).
+	RenderSkipped bool
 }
 
 // FieldProvenance is the resolved provenance of one fact: the winning source
