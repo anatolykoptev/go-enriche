@@ -254,7 +254,7 @@ func (e *Enricher) EnrichBatch(ctx context.Context, items []Item) []*Result {
 // can refute the closed verdict). When OrgData is available, merges business
 // data into facts at sourceMaps via the resolver.
 func (e *Enricher) checkMapsStatus(ctx context.Context, item Item, _ *Result, r *resolver) fetch.PageStatus {
-	if e.mapsChecker == nil || item.Mode != ModePlaces {
+	if e.mapsChecker == nil || item.Mode != ModePlaces || item.SkipMapsCheck {
 		return ""
 	}
 	cr, err := e.mapsChecker.Check(ctx, item.Name, item.City, item.Address)
