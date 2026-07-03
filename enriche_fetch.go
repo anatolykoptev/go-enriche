@@ -212,6 +212,14 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 			e.metrics.browserRenderError()
 			e.logger.DebugContext(ctx, "enriche: homepage render failed/shell",
 				"url", item.URL, "rendered_bytes", len(rendered), "err", err)
+			// Render ATTEMPTED-BUT-FAILED → the result now rests on the SAME
+			// raw-only Facts/SiteNumbers an intentional skip produces, with NO
+			// successful render corroboration. Mark RenderSkipped so the go-wp
+			// Correctable gate treats a render-failed-degrade like a skip, not as
+			// render-confirmed (a NON-poisoned thin page whose render fails and
+			// falls back to raw with SiteNumbers is the reachable wrong-with-number
+			// case; a poisoned page still drops its phone via Poison-OR).
+			result.RenderSkipped = true
 		}
 	}
 

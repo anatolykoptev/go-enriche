@@ -392,3 +392,35 @@ func TestEnrich_RenderSkip_ContactsPoisonedAnchored_StillRenders(t *testing.T) {
 		t.Fatalf("poisoned contacts number = %+v, want DNI=true Trustworthy=false", *n)
 	}
 }
+
+// --- HIGH#1 homepage degrade: a render ATTEMPTED-BUT-FAILED rests on raw-only,
+// so RenderSkipped must be TRUE even though the render was tried (not skipped).
+// A NON-poisoned rich page renders (absent_contacts), the render returns a
+// sub-minRenderShellBytes shell → degrade to raw → RenderSkipped=true. ---
+func TestEnrich_RenderSkip_HomepageRenderError_MarksRawOnly(t *testing.T) {
+	t.Parallel()
+	srv := newTestServer(richTextNoContacts, 200)
+	defer srv.Close()
+
+	var renderErrors int
+	e := newTestEnricher(
+		WithFetcher(testFetcher()),
+		WithMapsChecker(&mockMapsChecker{lat: 59.93, lon: 30.33}),
+		WithBrowserFetch(func(_ context.Context, _ string) (string, error) {
+			return strings.Repeat("x", 200), nil // sub-minRenderShellBytes shell → degrade
+		}),
+		WithMetrics(&Metrics{OnBrowserRenderError: func() { renderErrors++ }}),
+	)
+	result, err := e.Enrich(context.Background(), Item{
+		Name: "Студия", URL: srv.URL, City: "Санкт-Петербург", Mode: ModePlaces,
+	})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+	if renderErrors < 1 {
+		t.Fatalf("OnBrowserRenderError = %d, want >=1 (the render was attempted and failed)", renderErrors)
+	}
+	if !result.RenderSkipped {
+		t.Fatal("RenderSkipped = false, want true (render-error degrade rests on raw-only, must be marked)")
+	}
+}
