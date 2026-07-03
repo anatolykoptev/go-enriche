@@ -209,6 +209,13 @@ func TestEnrich_ContactsPage_RenderErrorShellDegradesToRaw(t *testing.T) {
 	if result.Facts.Email != nil {
 		t.Fatalf("Email = %q, want nil (error shell must not produce facts)", *result.Facts.Email)
 	}
+	// HIGH#1: a render ATTEMPTED-BUT-FAILED (shell) degrades to raw-only with no
+	// successful render corroboration, so the go-wp Correctable gate must see
+	// RenderSkipped=true — a degrade is not render-confirmed data. (homeLinksContacts
+	// also fails its homepage render here, so either leg suffices to set the flag.)
+	if !result.RenderSkipped {
+		t.Fatal("RenderSkipped = false, want true (render-error degrade rests on raw-only, must be marked)")
+	}
 }
 
 // TestEnrich_ContactsPage_NoDiscoveryWhenNoLink verifies the no-op path: a

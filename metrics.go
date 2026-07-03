@@ -77,6 +77,17 @@ type Metrics struct {
 	//   "ox_browser_search_source" — oxBrowser.Extract(srcURL) in fetchOneSource
 	// (enrich_target_blocked_total{site}).
 	OnTargetBlocked func(site string)
+
+	// OnBrowserRenderSkipped fires once per fetch leg where a headless-browser
+	// render the OLD escalation gate WOULD have fired was SKIPPED because the raw
+	// fetch already carried a trustworthy anchored site number
+	// (rawContactsSufficient) — the render-avoidance win (mcmedok 30s→~2s). leg
+	// names the leg that skipped ("homepage" | "contacts"); reason names why the
+	// skip was safe ("raw_sufficient" — a non-poisoned anchored SiteNumber was
+	// present in the raw HTML). Kept SEPARATE from OnBrowserRender (whose call
+	// sites all mean "a render happened") so overloading it can never corrupt the
+	// render-avoidance-rate signal (enrich_browser_render_skipped_total{leg,reason}).
+	OnBrowserRenderSkipped func(leg, reason string)
 }
 
 func (m *Metrics) cacheHit() {
@@ -160,5 +171,11 @@ func (m *Metrics) legalVsVenueAddress() {
 func (m *Metrics) targetBlocked(site string) {
 	if m != nil && m.OnTargetBlocked != nil && site != "" {
 		m.OnTargetBlocked(site)
+	}
+}
+
+func (m *Metrics) browserRenderSkipped(leg, reason string) {
+	if m != nil && m.OnBrowserRenderSkipped != nil && leg != "" && reason != "" {
+		m.OnBrowserRenderSkipped(leg, reason)
 	}
 }
