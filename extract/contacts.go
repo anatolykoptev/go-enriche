@@ -58,12 +58,13 @@ const (
 // Phone-candidate tiers, highest first. The local-area-code resolver ranks by
 // tier only as a fallback (when no candidate is local to the article's city).
 const (
-	tierDemoted    = 0 // a tel: inside a named call-tracking widget, or an 8-800
-	tierMicrodata  = 1 // [itemprop=telephone] / og: / JSON-LD prior phone
-	tierBody       = 2 // a human-facing tel: in the page body
-	tierContacts   = 3 // a tel: in the header/footer/address/contacts region
-	tierBranchJSON = 4 // a phone read from a national-chain inline-script branch-locator JSON (branchjson.go) — anchored, NOT DNI-immune
-	tierSocialLink = 5 // a hard-coded wa.me / api.whatsapp.com phone — DNI-immune
+	tierDemoted     = 0 // a tel: inside a named call-tracking widget, or an 8-800
+	tierMicrodata   = 1 // [itemprop=telephone] / og: / JSON-LD prior phone
+	tierBody        = 2 // a human-facing tel: in the page body
+	tierContacts    = 3 // a tel: in the header/footer/address/contacts region
+	tierBranchJSON  = 4 // a phone read from a national-chain inline-script branch-locator JSON (branchjson.go) — anchored, NOT DNI-immune
+	tierSchemaPlace = 5 // a phone read from schema.org MULTI-LOCATION structured data, one entry per branch (schemaplace.go) — same trust class as tierBranchJSON: anchored, NOT DNI-immune, distinct Source for accurate provenance (see numSourceSchemaPlace)
+	tierSocialLink  = 6 // a hard-coded wa.me / api.whatsapp.com phone — DNI-immune
 )
 
 // tollFreeAreaCode is the 8-800 toll-free / call-tracking area code. An 8-800

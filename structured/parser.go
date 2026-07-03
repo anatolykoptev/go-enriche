@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/astappiev/microdata"
+	"golang.org/x/net/html"
 )
 
 // Schema.org type names used for lookup.
@@ -33,6 +34,22 @@ func Parse(r io.Reader, contentType, pageURL string) (*Data, error) {
 	md, err := microdata.ParseHTML(r, contentType, pageURL)
 	if err != nil {
 		return nil, fmt.Errorf("microdata parse: %w", err)
+	}
+	return &Data{raw: md}, nil
+}
+
+// ParseNode extracts JSON-LD and Microdata from an ALREADY-PARSED HTML node
+// tree, mirroring Parse but skipping its reader/html.Parse step. For a
+// caller that already holds a parsed tree — e.g. extract.schemaPlaceCandidates,
+// which reuses a *goquery.Document's own root node — this avoids a redundant
+// serialize-back-to-string-then-reparse round trip over the same page.
+// astappiev/microdata's own ParseHTML does exactly this internally
+// (html.Parse then ParseNode), so this is the same walk, just fed a tree the
+// caller already has.
+func ParseNode(root *html.Node, pageURL string) (*Data, error) {
+	md, err := microdata.ParseNode(root, pageURL)
+	if err != nil {
+		return nil, fmt.Errorf("microdata parse node: %w", err)
 	}
 	return &Data{raw: md}, nil
 }
