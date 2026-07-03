@@ -1,0 +1,46 @@
+<!DOCTYPE html><html lang="ru"><head><title>Медок — сеть медицинских клиник</title>
+<!--
+  REAL CAPTURE — mcmedok.ru/sankt-peterburg/ (live HTTP fetch via curl on
+  krolik, 2026-07-02; the request 301-redirects to www.mcmedok.ru). This is
+  the branchJSON-extraction P0 driving bug: the page's only VISIBLE tel:
+  href is a Moscow +7(499) number (all 4 occurrences on the live page share
+  the class "ct_phone_msk_1"); the real per-branch phones — including the
+  target city's own SPb 812 line — live ONLY inside a Bitrix inline-script
+  JS variable (`marker_data`), a JSON array serialized as a single-quoted JS
+  STRING LITERAL (\u-escaped Cyrillic, \/-escaped slashes). Every DOM finder
+  that predates branchJSONCandidates (tel:/microdata/social-link/og:) is
+  blind to this, so CollectSiteNumbers never saw the 812 at all — wp_verify
+  then falsely flagged a correct SPb card as "wrong".
+
+  Trimmed to the load-bearing DOM: the visible Moscow tel: href (verbatim,
+  byte-for-byte from the capture, including its HTML-entity-encoded href)
+  plus the marker_data <script> tag's TWO real JS statements — `marker_data`
+  itself narrowed from the live page's 25 branches down to 2 (branch
+  id="507", a Moscow "l"-region entry, and branch id="250398", the SPb
+  "spb"-region entry carrying 767-36-61), each object copied byte-for-byte
+  from the capture, unmodified — plus the trailing `var region = {...}`
+  statement kept VERBATIM and in full. That second statement (with its own
+  nested "LIST_DOMAINS" array) is deliberately preserved: it is what makes
+  the real page's <script> tag hold TWO separate bracketed JS values, not
+  one. A naive whole-script kitllm.ExtractJSON call over-captures past
+  marker_data's own closing "]" into this trailing object and fails to
+  parse — confirmed empirically against the live capture — which is exactly
+  why branchJSONCandidates (extract/branchjson.go) scopes each ExtractJSON
+  call to one ';'-delimited JS statement rather than the whole <script>
+  text. Unrelated markup (nav chrome, analytics, the Calltouch async loader)
+  was dropped; the Calltouch loader specifically was confirmed NOT to trip
+  detectDNIVendor on the live page — its script src is built at runtime via
+  string concatenation (never a literal <script src="...">), and none of
+  Calltouch's inline config tokens ("window.ct(", "ct_data",
+  "calltouch_session", "calltouchsiteid") appear anywhere in its loader
+  snippet — so this trimmed fixture is dni:false, matching the live page.
+-->
+</head><body>
+<header class="b-header">
+  <a class="b-phones_link ct_phone_msk_1" rel="nofollow" href="tel:&#43;7&#40;499&#41;6538070"> &#43;7 &#40;499&#41; 653-80-70 </a>
+</header>
+<script data-skip-moving="Y">
+    var currentClinik = '', marker_data = '[{"title":"Медок Бутово","id":"507","lat":"55.549229153269","lng":"37.556503626984","phone":"+7 (499)  653-82-20","phoneLink":"+74996538220","region":"l","adress":"улица Скобелевская, д. 5, корп. 1","schedule":"пн-пт 7:00- 21:00","schedule2":"сб-вс 8:00-20:00","email":"callcenter@mcmedok.ru","link":"https:\/\/www.mcmedok.ru\/clinics\/butovo\/","infoclinic_id":"7"},{"title":"Медок Невский","id":"250398","lat":"59.89912383905","lng":"30.451250152993","phone":"+7 (812)  767-36-61","phoneLink":"+78127673661","region":"spb","adress":"улица Дыбенко, д. 5, корп. 1, стр. 1, помещ. 15-Н","schedule":"пн-пт 7:00-21:00<br\/>","schedule2":"сб-вс 8:00-20:00","email":"callcenter@mcmedok.ru","link":"https:\/\/www.mcmedok.ru\/clinics\/sankt-peterburg-nevskij\/","infoclinic_id":"23"}]';
+    var region = {"current":{"ID":"279151","NAME":"Москва","IBLOCK_ID":"125","DETAIL_TEXT":"","PROPERTY_MAIN_DOMAIN_VALUE":"","PROPERTY_DEFAULT_VALUE":"Да","PROPERTY_REGION_NAME_DECLINE_RP_VALUE":"Москве","PROPERTY_REGION_NAME_DECLINE_PP_VALUE":"Москвы","PROPERTY_REGION_NAME_DECLINE_TP_VALUE":"Москвой","PROPERTY_REGION_TAG_YANDEX_MAP_VALUE":"55.755864,37.617698","PROPERTY_SHORT_NAME_VALUE":"Москва","LIST_DOMAINS":["",""],"LOCATION":null},"selected":null,"moscow":false,"spb":false};
+</script>
+</body></html>

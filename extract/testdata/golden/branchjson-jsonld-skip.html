@@ -1,0 +1,28 @@
+<!DOCTYPE html><html lang="ru"><head><title>Test clinic</title>
+<!--
+  REPRESENTATIVE (synthetic) — the JSON-LD skip golden (pr-review-council
+  MEDIUM finding on PR #30). A standard schema.org LocalBusiness JSON-LD
+  block (<script type="application/ld+json">) carries a clean "telephone"
+  field — structurally indistinguishable from a real branch-locator object
+  once parsed. branchJSONCandidates must NEVER read this script: JSON-LD is
+  Phase-2's domain (structured.Places()), not branchJSON's, regardless of
+  whether its content would otherwise pass every anti-fab gate.
+
+  NOTE on RED-on-revert scope: this is a BARE JSON-LD object (no `var X =`
+  wrapper) — the real-world shape. Under the local string-literal unwrap
+  (extract/branchjson.go, post-council Fix 1), a bare object is ALREADY
+  structurally excluded regardless of the type filter, since
+  jsStringLiteralAssignments only matches `= '...'`/`= "..."` assignments
+  and a raw JSON-LD block has no `=` sign at all (JSON uses `:`, not `=`).
+  So this fixture's GREEN result is not, by itself, sensitive to reverting
+  the type filter alone — see TestIsJSExecutableScript in branchjson_test.go
+  for the type-filter's OWN isolated, genuinely RED-on-revert coverage. This
+  fixture still stands as the real-world regression guard the council asked
+  for (and stays RED if the whole finder is reverted, since then EVERY
+  finder in the file is gone).
+-->
+</head><body>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"LocalBusiness","name":"Клиника","telephone":"+7 (812) 111-22-33"}
+</script>
+</body></html>
