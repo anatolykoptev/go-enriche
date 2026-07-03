@@ -1,0 +1,19 @@
+<!DOCTYPE html><html lang="ru"><head><title>Test chain</title>
+<!--
+  REPRESENTATIVE (synthetic) — the P2 schema.org MULTI-LOCATION golden. No
+  live failing card exists yet for this class (see the P2 plan's Open
+  Questions); this fixture is a REPRESENTATIVE @graph of two branches, each
+  its own schema.org LocalBusiness entry with a distinct city + telephone —
+  the standard-markup analogue of mcmedok.html's bespoke inline-script
+  branch-locator JSON (branchjson.go/mcmedok.html). Reuses the SAME @graph
+  shape structured/parser_test.go's TestPlaces_Multiple already proves
+  astappiev/microdata parses correctly.
+-->
+</head><body>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[
+  {"@type":"LocalBusiness","name":"Клиника СПб","telephone":"+7 (812) 222-33-44"},
+  {"@type":"LocalBusiness","name":"Клиника Москва","telephone":"+7 (495) 111-22-33"}
+]}
+</script>
+</body></html>
