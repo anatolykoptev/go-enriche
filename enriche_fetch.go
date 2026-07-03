@@ -153,7 +153,7 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 	// poison signal forces homeRawPoisoned=true and the render always fires (see
 	// rawContactsSufficient). thinContent stays an INDEPENDENT OR — a genuinely
 	// thin page always renders regardless of SiteNumbers.
-	rawSufficient := rawContactsSufficient(rawFacts, rawSiteNumbers, homeRawPoisoned)
+	rawSufficient := rawContactsSufficient(rawFacts, rawSiteNumbers, homeRawPoisoned, e.renderSkipDisabled)
 	shouldRenderHomepage := e.browserFetch != nil && (thinContent || !rawSufficient)
 	// Record the trust-gated render-skip (provenance flag + per-leg counter) when
 	// the render the OLD gate WOULD have fired (absent contacts, non-thin) was

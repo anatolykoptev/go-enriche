@@ -42,6 +42,17 @@ type Enricher struct {
 	logger           *slog.Logger
 	metrics          *Metrics
 
+	// renderSkipDisabled is the ADR-8 ops kill-switch for the render-skip escape
+	// hatch (rawContactsSufficient trust-gated anchored-SiteNumber arm, go-enriche
+	// v1.30.0). When true, that arm is bypassed and the headless render escalates
+	// exactly as it did pre-v1.30.0 (thin content OR a missing single-winner Facts
+	// contact) regardless of any anchored raw SiteNumber. The DATA consequence of a
+	// wrong skip is one-way — a number auto-written to a live paid card cannot be
+	// un-published by a code revert — so ops must be able to disable the skip
+	// WITHOUT a code change. Default false = skip enabled (v1.30.0 win). Set via
+	// WithRenderSkipDisabled; go-wp drives it from a container env.
+	renderSkipDisabled bool
+
 	// targetGuard is the SSRF safety check run before a fetched URL is handed
 	// to an external render/extraction delegate this package does not control
 	// the outbound dial for (oxBrowser, browserFetch) — see checkTarget and
