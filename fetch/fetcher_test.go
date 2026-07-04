@@ -256,3 +256,75 @@ func TestFetch_ContextCanceled(t *testing.T) {
 		t.Errorf("expected unreachable for canceled context, got %s", result.Status)
 	}
 }
+
+// TestFetch_SetsUserAgent proves WithUserAgent's header lands on the actual
+// outbound request, using the same unguarded-fetcher-over-httptest pattern as
+// every other fetcher-behavior test in this file.
+func TestFetch_SetsUserAgent(t *testing.T) {
+	t.Parallel()
+	const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+	var gotUA string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	f := newUnguardedFetcher(WithUserAgent(ua))
+	if _, err := f.Fetch(context.Background(), srv.URL); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotUA != ua {
+		t.Errorf("User-Agent = %q, want %q", gotUA, ua)
+	}
+}
+
+// TestFetch_NoUserAgent_DefaultGoUA pins the pre-WithUserAgent behavior this
+// package has always had: absent WithUserAgent, doFetch sets no explicit
+// User-Agent header at all, so net/http falls back to its own default
+// ("Go-http-client/1.1"). This is the exact gap the go-wp #190 review found
+// (a bare Go UA can make some sites serve degraded/blocked content, breaking
+// verdict-neutrality against a browser-UA baseline) — this test documents
+// the default so a future accidental change to it is caught here, not
+// discovered downstream.
+func TestFetch_NoUserAgent_DefaultGoUA(t *testing.T) {
+	t.Parallel()
+	var gotUA string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	f := newUnguardedFetcher()
+	if _, err := f.Fetch(context.Background(), srv.URL); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.HasPrefix(gotUA, "Go-http-client/") {
+		t.Errorf("User-Agent = %q, want the net/http default (Go-http-client/*) — WithUserAgent not set", gotUA)
+	}
+}
+
+// TestNewFetcher_WithUserAgent_KeepsDefaultSSRFGuard proves WithUserAgent is
+// a pure request-header option that does NOT disturb NewFetcher's default
+// client construction (httputil.NewSSRFGuardedClient(&http.Client{...}),
+// the STRONG connect-time-guarded tier — see NewFetcher's and WithUserAgent's
+// doc comments). Mirrors ssrf_test.go's TestFetcher_RefusesBlockedTargets
+// exactly, with WithUserAgent added, on the REAL guarded default (no
+// WithClient escape hatch here, unlike every other test in this file) — a
+// regression where a future WithUserAgent implementation wrapped f.client in
+// a RoundTripper instead of setting a request header would either break this
+// (if it replaced the guarded client) or pass vacuously; combined with
+// TestFetch_SetsUserAgent above (which proves the header actually lands),
+// the pair proves the option is additive-only.
+func TestNewFetcher_WithUserAgent_KeepsDefaultSSRFGuard(t *testing.T) {
+	t.Parallel()
+	f := NewFetcher(WithUserAgent("Mozilla/5.0 test-probe"))
+	result, err := f.Fetch(context.Background(), "http://127.0.0.1:1/x")
+	if err != nil {
+		t.Fatalf("unexpected Fetch error: %v", err)
+	}
+	if result.Status != StatusUnreachable {
+		t.Errorf("Fetch(loopback) = status %s, want %s (blocked) — WithUserAgent must not weaken or bypass the default SSRF guard", result.Status, StatusUnreachable)
+	}
+}
