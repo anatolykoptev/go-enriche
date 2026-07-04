@@ -26,6 +26,10 @@ type Fetcher struct {
 	client       *http.Client
 	maxBodyBytes int64
 	sf           singleflight.Group
+	// userAgent, when non-empty, is sent as the request's User-Agent header
+	// (see WithUserAgent). Empty (the zero value) sends no explicit header at
+	// all, so net/http falls back to its own default ("Go-http-client/1.1").
+	userAgent string
 }
 
 // Option configures a Fetcher.
@@ -46,6 +50,26 @@ func WithMaxBodyBytes(n int64) Option {
 // WithTimeout sets the HTTP client timeout.
 func WithTimeout(d time.Duration) Option {
 	return func(f *Fetcher) { f.client.Timeout = d }
+}
+
+// WithUserAgent sets the User-Agent header doFetch sends on every request.
+// NewFetcher's default (no WithUserAgent) sets NO explicit header, so
+// net/http sends its own default ("Go-http-client/1.1") — distinguishable
+// from a real browser, which some sites serve degraded or blocked content
+// to. This is a REQUEST-level header set inside doFetch, deliberately not a
+// client/RoundTripper wrap: NewFetcher's default client must stay exactly
+// `httputil.NewSSRFGuardedClient(&http.Client{...})` (a real, nil-then-cloned
+// *http.Transport under the hood) so the guard's strong, connect-time,
+// DNS-rebind-proof tier applies (see NewFetcher's doc comment and go-kit
+// httputil.NewSSRFGuardedClient's own doc comment on the two composition
+// tiers) — wrapping the client in a UA-setting http.RoundTripper would make
+// its Transport an opaque, non-*http.Transport type, which a caller
+// composing this Fetcher's client through NewSSRFGuardedClient a second time
+// would fall into the WEAKER pre-request-only tier for. Setting the header
+// on the *http.Request instead has zero effect on transport/guard
+// composition.
+func WithUserAgent(ua string) Option {
+	return func(f *Fetcher) { f.userAgent = ua }
 }
 
 // NewFetcher creates a Fetcher with the given options. The default client is
@@ -103,6 +127,9 @@ func (f *Fetcher) doFetch(ctx context.Context, rawURL string) (*FetchResult, err
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return &FetchResult{Status: StatusUnreachable}, nil
+	}
+	if f.userAgent != "" {
+		req.Header.Set("User-Agent", f.userAgent)
 	}
 
 	resp, err := client.Do(req) //nolint:gosec // URL is user-provided by design; guarded against internal targets by NewFetcher's default transport (see go-kit httputil.NewSSRFGuardedClient)
