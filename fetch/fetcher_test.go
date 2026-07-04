@@ -328,3 +328,40 @@ func TestNewFetcher_WithUserAgent_KeepsDefaultSSRFGuard(t *testing.T) {
 		t.Errorf("Fetch(loopback) = status %s, want %s (blocked) — WithUserAgent must not weaken or bypass the default SSRF guard", result.Status, StatusUnreachable)
 	}
 }
+
+// TestFetch_FollowRedirects_CrossDomain_ReturnsFinalBody is
+// TestFetch_DomainRedirect's WithFollowRedirects counterpart: the SAME
+// origin-redirects-to-target two-server setup, but with WithFollowRedirects
+// set — this must now return the FINAL page's body (StatusActive), not an
+// empty-bodied StatusRedirect. TestFetch_DomainRedirect (unchanged, above in
+// this file) pins that the default (option unset) behavior is byte-for-byte
+// identical to before this option existed.
+func TestFetch_FollowRedirects_CrossDomain_ReturnsFinalBody(t *testing.T) {
+	t.Parallel()
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("redirected content"))
+	}))
+	defer target.Close()
+
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/new-page", http.StatusMovedPermanently)
+	}))
+	defer origin.Close()
+
+	f := newUnguardedFetcher(WithFollowRedirects())
+	result, err := f.Fetch(context.Background(), origin.URL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != StatusActive {
+		t.Errorf("WithFollowRedirects: expected active (final page fetched), got %s", result.Status)
+	}
+	if !strings.Contains(result.HTML, "redirected content") {
+		t.Errorf("WithFollowRedirects: expected the FINAL destination's body, got %q", result.HTML)
+	}
+	if result.FinalURL == "" || !strings.Contains(result.FinalURL, "new-page") {
+		t.Errorf("WithFollowRedirects: expected FinalURL to reflect the final hop, got %q", result.FinalURL)
+	}
+}

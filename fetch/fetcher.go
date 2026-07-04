@@ -30,6 +30,11 @@ type Fetcher struct {
 	// (see WithUserAgent). Empty (the zero value) sends no explicit header at
 	// all, so net/http falls back to its own default ("Go-http-client/1.1").
 	userAgent string
+	// followRedirects, when true, makes doFetch follow a cross-domain
+	// redirect through to its final destination instead of aborting with
+	// StatusRedirect + an empty body (see WithFollowRedirects). Default
+	// false preserves the pre-existing behavior byte-for-byte.
+	followRedirects bool
 }
 
 // Option configures a Fetcher.
@@ -70,6 +75,40 @@ func WithTimeout(d time.Duration) Option {
 // composition.
 func WithUserAgent(ua string) Option {
 	return func(f *Fetcher) { f.userAgent = ua }
+}
+
+// WithFollowRedirects makes doFetch follow a cross-domain redirect through
+// to its final destination (up to maxRedirects hops, browser-like) instead
+// of aborting with StatusRedirect and an empty body — the pre-existing,
+// still-default (this option unset) behavior. FinalURL is still populated
+// from the last hop either way.
+//
+// Why this exists (go-wp#190 live regression, 2026-07): a caller's raw
+// fetch of an operator-supplied website (e.g. wp_verify) may legitimately
+// redirect cross-domain for canonicalization (bare-domain -> www, http ->
+// https, or a city/locale-prefixed canonical host) — mcmedok.ru and
+// excimerclinic.ru both do this. Without this option, doFetch's default
+// cross-domain-redirect short-circuit discarded the (already fetched) final
+// page's body entirely, which silently degraded a caller relying on content
+// extraction (wp_verify fell back to a weaker source tier and regressed a
+// live verdict). The default stays OFF because a cross-domain redirect is
+// ALSO a meaningful signal on its own for some callers (e.g. detecting a
+// defunct site parked/redirected to an unrelated domain) — this option is
+// an explicit opt-in for callers that want content over that signal.
+//
+// SSRF: the guard is UNCHANGED and un-weakened by this option. doFetch's
+// client is still built by NewFetcher's default construction
+// (httputil.NewSSRFGuardedClient), and net/http's Client routes EVERY
+// request it issues -- the original AND every followed redirect hop --
+// through that SAME client.Transport.RoundTrip; there is no separate,
+// unguarded code path for a redirect target. Concretely: the strong tier's
+// GuardedDialContext Control hook (go-kit httputil/ssrf.go) re-runs at
+// connect time for EACH hop's already-DNS-resolved address, so a redirect
+// to a loopback / private / link-local / cloud-metadata target is refused
+// at that hop exactly as the original URL would be -- this option makes
+// redirects reach further, it does not make any one of them less guarded.
+func WithFollowRedirects() Option {
+	return func(f *Fetcher) { f.followRedirects = true }
 }
 
 // NewFetcher creates a Fetcher with the given options. The default client is
@@ -138,8 +177,11 @@ func (f *Fetcher) doFetch(ctx context.Context, rawURL string) (*FetchResult, err
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
-	// Detect cross-domain redirect.
-	if finalURL != "" && extractHost(finalURL) != origHost {
+	// Detect cross-domain redirect. Skipped when followRedirects is set --
+	// the request has already been followed through to resp by client.Do
+	// (CheckRedirect above returns nil until maxRedirects), so falling
+	// through below reads resp/body from the FINAL hop, not this one.
+	if finalURL != "" && extractHost(finalURL) != origHost && !f.followRedirects {
 		return &FetchResult{
 			Status:     StatusRedirect,
 			FinalURL:   finalURL,
