@@ -184,6 +184,10 @@ func CollectSiteNumbers(doc *goquery.Document, pagePoisoned bool) []PhoneNumberF
 	// branchjson.go's and schemaplace.go's doc comments).
 	cands = append(cands, branchJSONCandidates(doc)...)
 	cands = append(cands, schemaPlaceCandidates(doc)...)
+	// Plain-text phones printed inside a genuine phone-labeled contacts region
+	// (a «Телефоны» block with no tel: href and no microdata) — SiteNumbers-set
+	// only, never collectPhoneCandidates, so Facts.Phone stays byte-unchanged.
+	cands = append(cands, contactsTextCandidates(doc, cands)...)
 	if len(cands) == 0 {
 		return nil
 	}
