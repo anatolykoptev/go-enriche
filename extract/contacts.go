@@ -58,6 +58,11 @@ const (
 // Phone-candidate tiers, highest first. The local-area-code resolver ranks by
 // tier only as a fallback (when no candidate is local to the article's city).
 const (
+	// tierDemoted MUST stay at iota-zero: an unset phoneCandidate.naturalTier
+	// (zero value) maps here, so numberIsAnchored/dniTrustworthy fail CLOSED
+	// (untrustworthy) for any candidate a future finder forgets to tier.
+	// Reordering this block so tierDemoted != 0 would make an untiered
+	// candidate fail OPEN (anchored/trustworthy by default) — do not.
 	tierDemoted     = 0 // a tel: inside a named call-tracking widget, or an 8-800
 	tierMicrodata   = 1 // [itemprop=telephone] / og: / JSON-LD prior phone
 	tierBody        = 2 // a human-facing tel: in the page body

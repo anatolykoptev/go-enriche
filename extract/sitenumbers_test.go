@@ -281,3 +281,44 @@ func TestCollectSiteNumbers_TollFreeCallTrackingNestedStaysUntrustworthy(t *test
 		t.Errorf("real 812 contacts tel: should be present and Trustworthy; got %+v", real)
 	}
 }
+
+// TestCollectSiteNumbers_TollFreeStaticAnchoredUnderDNIStaysUntrustworthy locks
+// the fail-open boundary the naturalTier fix could have opened: an 8-800 that
+// is statically anchored in a legit region (naturalTier == tierContacts) but on
+// a page that ALSO runs a genuine DNI/call-tracking vendor script MUST stay
+// Untrustworthy. The number is Anchored (static, real DOM region) and DNI
+// (vendor active), yet dniTrustworthy(tierContacts, dni=true) == false — only a
+// DNI-immune social-link candidate survives a DNI-active page. This is the
+// precise line the fix relies on to stay conservative: keying trust off
+// naturalTier rehabilitates a toll-free number ONLY on a clean page, never
+// under active DNI. Regression-guards against a future change that would trust
+// a statically-anchored number regardless of the page-level DNI gate.
+func TestCollectSiteNumbers_TollFreeStaticAnchoredUnderDNIStaysUntrustworthy(t *testing.T) {
+	t.Parallel()
+	// Static 8-800 tel: in the header (naturalTier=tierContacts) on a page that
+	// actively runs comagic (a DNI/call-tracking vendor loader in a <script src>).
+	html := `<html><head>
+	<script src="https://app.comagic.ru/comagic.js"></script>
+	</head><body>
+	<header class="header"><a href="tel:88003005863">8-800-300-58-63</a></header>
+	</body></html>`
+	doc, err := documentFromHTML(html)
+	if err != nil || doc == nil {
+		t.Fatalf("parse: %v", err)
+	}
+	nums := CollectSiteNumbers(doc, false)
+
+	tollFree := findByValueSubstring(nums, "300-58-63")
+	if tollFree == nil {
+		t.Fatalf("SiteNumbers missing the static 8-800 header tel: candidate; got %+v", nums)
+	}
+	if !tollFree.Anchored {
+		t.Errorf("8-800 Anchored = false, want true (static tel: in the contacts region — naturalTier is preserved even under DNI)")
+	}
+	if !tollFree.DNI {
+		t.Errorf("8-800 DNI = false, want true (comagic vendor script is active on this page)")
+	}
+	if tollFree.Trustworthy {
+		t.Errorf("8-800 Trustworthy = true, want false (DNI active — a statically-anchored number does NOT survive the page-level DNI gate; only a social-link candidate does)")
+	}
+}
