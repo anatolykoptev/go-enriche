@@ -58,6 +58,11 @@ const (
 // Phone-candidate tiers, highest first. The local-area-code resolver ranks by
 // tier only as a fallback (when no candidate is local to the article's city).
 const (
+	// tierDemoted MUST stay at iota-zero: an unset phoneCandidate.naturalTier
+	// (zero value) maps here, so numberIsAnchored/dniTrustworthy fail CLOSED
+	// (untrustworthy) for any candidate a future finder forgets to tier.
+	// Reordering this block so tierDemoted != 0 would make an untiered
+	// candidate fail OPEN (anchored/trustworthy by default) — do not.
 	tierDemoted     = 0 // a tel: inside a named call-tracking widget, or an 8-800
 	tierMicrodata   = 1 // [itemprop=telephone] / og: / JSON-LD prior phone
 	tierBody        = 2 // a human-facing tel: in the page body
@@ -314,9 +319,25 @@ func firstMailto(doc *goquery.Document) *string {
 // phoneCandidate is one site-own phone with the metadata the resolver needs to
 // rank it: its DOM region tier and its area code.
 type phoneCandidate struct {
-	value    string // human-facing display value
-	tier     int    // tierContacts / tierMicrodata / tierBody / tierDemoted
-	areaCode int    // 3-digit RU area code, or -1
+	value string // human-facing display value
+	// tier is the DISPLAY-rank tier pickPhoneCandidate/Facts.Phone uses. An
+	// 8-800 is demoted to tierDemoted here so a city-local landline wins the
+	// single-winner city-guide pick.
+	tier int // tierContacts / tierMicrodata / tierBody / tierDemoted
+	// naturalTier is the candidate's true DOM-region tier BEFORE any toll-free
+	// demotion — what the finder/telTier assigned from where the number
+	// actually sits (contacts region, microdata, body, social-link, branch/
+	// schema JSON). It equals tier for every candidate EXCEPT a toll-free
+	// (8-800) number makeCandidate demotes to tierDemoted for display ranking:
+	// there tier == tierDemoted while naturalTier keeps the real region. The
+	// SiteNumbers sidecar (CollectSiteNumbers) keys its TRUST verdict
+	// (Source / Anchored / Trustworthy) off naturalTier, so a static,
+	// region-anchored 8-800 — a real published contact — stays Trustworthy,
+	// while a call-tracking-widget-nested tel: (naturalTier already tierDemoted
+	// via telTier's isCallTrackingDemoted arm) stays untrustworthy. An 8-800
+	// PREFIX is not dynamic-insertion evidence; the DOM region is.
+	naturalTier int
+	areaCode    int // 3-digit RU area code, or -1
 }
 
 // collectPhoneCandidates returns every valid site-own phone candidate, each
@@ -355,7 +376,7 @@ func makeCandidate(value string, naturalTier int) (phoneCandidate, bool) {
 	if isTollFree(ac) {
 		tier = tierDemoted
 	}
-	return phoneCandidate{value: value, tier: tier, areaCode: ac}, true
+	return phoneCandidate{value: value, tier: tier, naturalTier: naturalTier, areaCode: ac}, true
 }
 
 // telCandidates collects tel:/TEL: hrefs, classified by DOM region.

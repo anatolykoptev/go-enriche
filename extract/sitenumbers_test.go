@@ -187,3 +187,138 @@ func derefOrNilExtract(s *string) any {
 	}
 	return *s
 }
+
+// TestCollectSiteNumbers_TollFreeStaticContactsTrustworthy is the Точка
+// банкротства (spb.tochka-bankrotstva.ru) false-positive regression. A static
+// 8-800 tel: href in the header of a CLEAN official site (NO DNI/call-tracking
+// vendor script) is a real published contact and MUST be Trustworthy — an
+// 8-800 prefix is NOT dynamic-insertion evidence.
+//
+// Before the fix, makeCandidate demoted EVERY toll-free number to tierDemoted
+// purely on its prefix, so the sidecar tagged this static header 8-800
+// Anchored=false / Source="demoted" / Trustworthy=false even with dni=false.
+// wp_verify then dropped it from the trustworthy set and pickAuthoritative
+// promoted the social-link mobile, so a card carrying the real 8-800 read
+// verdict=wrong (the false positive). The fix keys the sidecar trust verdict
+// off the number's STATIC DOM region (naturalTier), not its prefix; the
+// city-guide DISPLAY pick (pickPhoneCandidate/Facts.Phone) still demotes an
+// 8-800 and is unchanged.
+func TestCollectSiteNumbers_TollFreeStaticContactsTrustworthy(t *testing.T) {
+	t.Parallel()
+	// Точка банкротства shape: a static 8-800 tel: in the header (and footer),
+	// plus a wa.me social-link mobile. No call-tracking vendor script anywhere.
+	html := `<html><body>
+	<header class="header">
+	  <a href="tel:88003005863">8-800-300-58-63</a>
+	  <a href="https://wa.me/+79022040206">WhatsApp</a>
+	</header>
+	<footer class="footer"><a href="tel:88003005863">8-800-300-58-63</a></footer>
+	</body></html>`
+	doc, err := documentFromHTML(html)
+	if err != nil || doc == nil {
+		t.Fatalf("parse: %v", err)
+	}
+	nums := CollectSiteNumbers(doc, false) // clean page; no separate raw-fetch stage
+
+	tollFree := findByValueSubstring(nums, "300-58-63")
+	if tollFree == nil {
+		t.Fatalf("SiteNumbers missing the static 8-800 header tel: candidate; got %+v", nums)
+	}
+	if tollFree.DNI {
+		t.Errorf("8-800 DNI = true, want false (no call-tracking vendor script on this page)")
+	}
+	if !tollFree.Anchored {
+		t.Errorf("8-800 Anchored = false, want true (static tel: in the header/contacts region — a real published contact)")
+	}
+	if tollFree.Source != regionContacts {
+		t.Errorf("8-800 Source = %q, want %q (its static DOM region, not the prefix-demoted bucket)", tollFree.Source, regionContacts)
+	}
+	if !tollFree.Trustworthy {
+		t.Errorf("8-800 Trustworthy = false, want true (static official-site number; an 8-800 prefix is NOT dynamic-insertion evidence)")
+	}
+
+	// Sanity: the social-link mobile is present and Trustworthy too, so the
+	// fixture genuinely carries both numbers (the 8-800 assertion is not
+	// vacuously passing over an empty/single-candidate set).
+	if social := findByValueSubstring(nums, "9022040206"); social == nil || !social.Trustworthy {
+		t.Errorf("wa.me mobile should be present and Trustworthy; got %+v", social)
+	}
+}
+
+// TestCollectSiteNumbers_TollFreeCallTrackingNestedStaysUntrustworthy is the
+// anti-vacuous control for the fix above: an 8-800 tel: nested INSIDE a named
+// call-tracking widget (comagic) is a genuine dynamic-insertion slot and MUST
+// stay Untrustworthy — the fix must NOT blanket-trust every 8-800, only ones
+// statically anchored in a legitimate region. isCallTrackingDemoted already
+// sets naturalTier=tierDemoted for this number, so it stays untrustworthy
+// independently of its toll-free prefix.
+func TestCollectSiteNumbers_TollFreeCallTrackingNestedStaysUntrustworthy(t *testing.T) {
+	t.Parallel()
+	html := `<html><body>
+	<footer class="footer">
+	  <div class="comagic-phone"><a href="tel:88005553535">8-800-555-35-35</a></div>
+	  <address><a href="tel:+78123334455">+7 (812) 333-44-55</a></address>
+	</footer></body></html>`
+	doc, err := documentFromHTML(html)
+	if err != nil || doc == nil {
+		t.Fatalf("parse: %v", err)
+	}
+	nums := CollectSiteNumbers(doc, false)
+
+	track := findByValueSubstring(nums, "555-35-35")
+	if track == nil {
+		t.Fatalf("SiteNumbers missing the call-tracking 8-800 candidate; got %+v", nums)
+	}
+	if track.Anchored {
+		t.Errorf("call-tracking-nested 8-800 Anchored = true, want false (dynamic tracking slot, not a static owned contact)")
+	}
+	if track.Trustworthy {
+		t.Errorf("call-tracking-nested 8-800 Trustworthy = true, want false (genuine dynamic-insertion evidence)")
+	}
+
+	// The real 812 contacts number is unaffected — Trustworthy as before.
+	if real := findByValueSubstring(nums, "333-44-55"); real == nil || !real.Trustworthy {
+		t.Errorf("real 812 contacts tel: should be present and Trustworthy; got %+v", real)
+	}
+}
+
+// TestCollectSiteNumbers_TollFreeStaticAnchoredUnderDNIStaysUntrustworthy locks
+// the fail-open boundary the naturalTier fix could have opened: an 8-800 that
+// is statically anchored in a legit region (naturalTier == tierContacts) but on
+// a page that ALSO runs a genuine DNI/call-tracking vendor script MUST stay
+// Untrustworthy. The number is Anchored (static, real DOM region) and DNI
+// (vendor active), yet dniTrustworthy(tierContacts, dni=true) == false — only a
+// DNI-immune social-link candidate survives a DNI-active page. This is the
+// precise line the fix relies on to stay conservative: keying trust off
+// naturalTier rehabilitates a toll-free number ONLY on a clean page, never
+// under active DNI. Regression-guards against a future change that would trust
+// a statically-anchored number regardless of the page-level DNI gate.
+func TestCollectSiteNumbers_TollFreeStaticAnchoredUnderDNIStaysUntrustworthy(t *testing.T) {
+	t.Parallel()
+	// Static 8-800 tel: in the header (naturalTier=tierContacts) on a page that
+	// actively runs comagic (a DNI/call-tracking vendor loader in a <script src>).
+	html := `<html><head>
+	<script src="https://app.comagic.ru/comagic.js"></script>
+	</head><body>
+	<header class="header"><a href="tel:88003005863">8-800-300-58-63</a></header>
+	</body></html>`
+	doc, err := documentFromHTML(html)
+	if err != nil || doc == nil {
+		t.Fatalf("parse: %v", err)
+	}
+	nums := CollectSiteNumbers(doc, false)
+
+	tollFree := findByValueSubstring(nums, "300-58-63")
+	if tollFree == nil {
+		t.Fatalf("SiteNumbers missing the static 8-800 header tel: candidate; got %+v", nums)
+	}
+	if !tollFree.Anchored {
+		t.Errorf("8-800 Anchored = false, want true (static tel: in the contacts region — naturalTier is preserved even under DNI)")
+	}
+	if !tollFree.DNI {
+		t.Errorf("8-800 DNI = false, want true (comagic vendor script is active on this page)")
+	}
+	if tollFree.Trustworthy {
+		t.Errorf("8-800 Trustworthy = true, want false (DNI active — a statically-anchored number does NOT survive the page-level DNI gate; only a social-link candidate does)")
+	}
+}
