@@ -24,8 +24,12 @@ type PhoneNumberFact struct {
 	// api.whatsapp.com — DNI-immune), "contacts" (a tel: in the header/
 	// footer/address/contacts region), "microdata" ([itemprop=telephone] /
 	// og:/business: meta), "body" (a tel: elsewhere on the page), or
-	// "demoted" (an 8-800, or a tel: nested inside a named call-tracking
-	// widget).
+	// "demoted" (a tel: nested inside a named call-tracking widget — a
+	// dynamic tracking slot). A plain 8-800 toll-free number is NO LONGER
+	// forced to "demoted" here: a static, region-anchored 8-800 is a real
+	// published contact and keeps its DOM-region Source (e.g. "contacts") and
+	// its Trustworthy verdict. The toll-free demotion applies only to the
+	// city-guide DISPLAY pick (pickPhoneCandidate), not this trust sidecar.
 	Source string
 	// Anchored is true when the candidate's tier is contacts-region-or-above
 	// (tierContacts / tierSocialLink / tierMicrodata) — i.e. NOT a bare-body
@@ -198,16 +202,29 @@ func CollectSiteNumbers(doc *goquery.Document, pagePoisoned bool) []PhoneNumberF
 		if key == "" {
 			continue
 		}
-		anchored := numberIsAnchored(c.tier)
+		// The TRUST view (Source / Anchored / Trustworthy) keys off the
+		// candidate STATIC DOM region (naturalTier), never its display-rank
+		// tier. An 8-800 that makeCandidate demoted to tierDemoted purely on
+		// its toll-free prefix is still a real, statically-published contact
+		// when it sits in a legit region (naturalTier == tierContacts/
+		// tierMicrodata/...), so it stays Anchored + Trustworthy here. A
+		// genuinely dynamic call-tracking-widget-nested tel: already carries
+		// naturalTier == tierDemoted (telTier isCallTrackingDemoted arm), so it
+		// stays untrustworthy — the prefix is not dynamic-insertion evidence,
+		// the DOM region is. naturalTier == tier for every non-toll-free
+		// candidate, so this is byte-identical for every existing fixture; the
+		// city-guide DISPLAY pick (pickPhoneCandidate/Facts.Phone) still reads
+		// c.tier and is unchanged.
+		anchored := numberIsAnchored(c.naturalTier)
 		tagged = append(tagged, keyed{
 			fact: PhoneNumberFact{
 				Value:       c.value,
-				Source:      numberSourceForTier(c.tier),
+				Source:      numberSourceForTier(c.naturalTier),
 				Anchored:    anchored,
 				DNI:         dni,
-				Trustworthy: dniTrustworthy(c.tier, dni),
+				Trustworthy: dniTrustworthy(c.naturalTier, dni),
 			},
-			tier: c.tier,
+			tier: c.naturalTier,
 			key:  key,
 		})
 	}
