@@ -79,6 +79,20 @@ func removeElements(doc *goquery.Document, selectors string) {
 	})
 }
 
+// stripNoiseClone returns a DETACHED clone of sel with every never-a-contact-
+// value noise element (removeNoiseSelectors: script/style/noscript/template/
+// svg/head) removed, leaving only page-visible text. Unlike stripNoise/
+// stripBoilerplate/removeElements it does NOT mutate the source document — the
+// caller keeps its live nodes intact. Load-bearing for contactsTextCandidates
+// (contactstext.go): CollectSiteNumbers runs the plain-text finder and then
+// detectDNIVendor (dni.go), which reads doc.Find("script") — an in-place strip
+// would blind DNI detection, so the plain-text scan clones instead.
+func stripNoiseClone(sel *goquery.Selection) *goquery.Selection {
+	c := sel.Clone()
+	c.Find(removeNoiseSelectors).Remove()
+	return c
+}
+
 // ExtractGoquery uses goquery CSS selectors to extract main content.
 // Returns content in the requested format and the page title.
 func ExtractGoquery(rawHTML string, format Format) (content string, title string) {

@@ -124,6 +124,57 @@ func TestCollectSiteNumbers_PlainTextContacts_BodyProseWithRequisites(t *testing
 	}
 }
 
+// TestCollectSiteNumbers_PlainTextContacts_SharedScopeRequisitesSkipped is the
+// NON-VACUOUS anti-fabrication control for containsIDLabel: unlike the
+// body-prose case (where «Реквизиты» sits in a SEPARATE <p>, so phoneValueScope
+// returns before the ID guard is ever consulted), here a «Тел.» label, a real
+// phone, and an ИНН digit-run share ONE inline block — the harvest node
+// therefore carries the ID label, and the fail-closed guard must skip the WHOLE
+// block. Both the ИНН and the co-located phone stay out of the trust set
+// (prefer-false-negative): this exercises containsIDLabel on the path where it
+// is the sole thing standing between the ИНН and a fabricated phone.
+func TestCollectSiteNumbers_PlainTextContacts_SharedScopeRequisitesSkipped(t *testing.T) {
+	t.Parallel()
+	const html = `<!doctype html><html><body>
+<div class="contacts"><p>Тел.: +7 (812) 507-83-55 ИНН 7825346838 ОГРН 1037858001181</p></div>
+</body></html>`
+	doc := docFromHTML(t, html)
+	nums := CollectSiteNumbers(doc, false)
+
+	if got := findByValueSubstring(nums, "507-83-55"); got != nil {
+		t.Errorf("phone sharing an inline scope with an ИНН must be skipped whole (fail-closed); got %+v", *got)
+	}
+	for _, bad := range []string{"7825346838", "1037858001181"} {
+		for i := range nums {
+			if DigitsOnly(nums[i].Value) == bad {
+				t.Errorf("identifier %s in a phone-labeled block was fabricated as a phone: %+v", bad, nums[i])
+			}
+		}
+	}
+}
+
+// TestCollectSiteNumbers_PlainTextContacts_SvgIconTextNotHarvested proves the
+// noise strip (removeNoiseSelectors, via stripNoiseClone) drops inline <svg>
+// text before the scan: a phone label whose value block also contains an <svg>
+// with a digit-run in a <text> node must NOT read that icon text as a phone.
+// Guards the reuse-reviewer MEDIUM-1 leak (the hand-rolled strip dropped svg).
+func TestCollectSiteNumbers_PlainTextContacts_SvgIconTextNotHarvested(t *testing.T) {
+	t.Parallel()
+	const html = `<!doctype html><html><body>
+<div class="footer"><div class="h6">Телефон</div>
+<div class="val"><svg><text>+7 (495) 111-22-33</text></svg>+7 (812) 507-83-55</div></div>
+</body></html>`
+	doc := docFromHTML(t, html)
+	nums := CollectSiteNumbers(doc, false)
+
+	if got := findByValueSubstring(nums, "111-22-33"); got != nil {
+		t.Errorf("<svg> icon text must be stripped before the phone scan; leaked %+v", *got)
+	}
+	if got := findByValueSubstring(nums, "507-83-55"); got == nil {
+		t.Errorf("real plain-text 812 phone should still be harvested; got %+v", nums)
+	}
+}
+
 // TestCollectSiteNumbers_PlainTextContacts_NoLabelNoExtraction proves the finder
 // is label-anchored, not a blanket digit scan: a valid-RU-phone-shaped plain-text
 // number with NO phone-context label nearby (here, in an unrelated article
