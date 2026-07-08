@@ -336,7 +336,7 @@ func (e *Enricher) Search(ctx context.Context, query, timeRange string) (*search
 // way that must NOT be deserialized from an older blob. v2 = Phase 3: Result
 // gained the Provenance sidecar; an old (v1) blob has no provenance, so we move
 // to a fresh key namespace rather than silently reading provenance-less data.
-const cacheSchemaVersion = "v2"
+const cacheSchemaVersion = "v3" // v3: SkipMapsCheck folded into cacheKey (v2 cross-contaminated skip=true/false results)
 
 func cacheKey(item Item) string {
 	base := "enriche:" + cacheSchemaVersion + ":" + item.URL
@@ -350,7 +350,17 @@ func cacheKey(item Item) string {
 	// this provenance work exists to prevent). The empty-seed fingerprint is
 	// appended unconditionally so a seeded and an unseeded call never collide;
 	// the common no-seed case keeps a single stable suffix.
-	return base + ":seed:" + seedFingerprint(item.Seed)
+	base += ":seed:" + seedFingerprint(item.Seed)
+	// SkipMapsCheck changes the enriched RESULT — it suppresses the closure
+	// status and every maps-merged OrgData field (place name/address/phone/
+	// website/hours/coords, see Item.SkipMapsCheck + resolver.mergeOrg). A
+	// skip=true blob (e.g. from a verify caller) must therefore never be served
+	// to a skip=false caller (wp_enrich). Only the true case gets a suffix, so
+	// the common maps-check-on path keeps a stable key.
+	if item.SkipMapsCheck {
+		base += ":nomaps"
+	}
+	return base
 }
 
 // seedFingerprint returns a short stable hash of the operator-verified seed.
