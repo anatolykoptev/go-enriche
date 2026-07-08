@@ -218,7 +218,15 @@ func jsStringLiteralAssignments(text string) []string {
 			k++
 		}
 		if k >= len(text) {
-			break // unterminated literal — stop scanning this script
+			// Unterminated literal. This is reachable ONLY when the inner loop
+			// above scanned to EOF without finding the closing quote — i.e. the
+			// entire span from the opening quote to end-of-text is inside this
+			// (unterminated) literal. No terminated assignment can therefore exist
+			// after it, so this break is equivalent to `return out`: it is NOT a
+			// fail-closed miss of a following valid literal (there is none). A
+			// well-formed literal always exits the inner loop via `text[k] == quote`
+			// with k < len, never here.
+			break
 		}
 		out = append(out, unescapeJSStringDelimiter(text[j+1:k], quote))
 		i = k + 1
