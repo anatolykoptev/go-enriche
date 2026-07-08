@@ -33,7 +33,16 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 				oxCh <- nil
 				return
 			}
+			// Time the ox-browser leg. It runs in PARALLEL with the direct
+			// homepage fetch, so this overlaps PhaseHomepageFetch and is NOT
+			// additive to total — but the render is the slowest single leg in the
+			// pipeline, and it was previously the only fetch leg with no timing.
+			// Its output is consumed (fallback when the direct fetch fails, or a
+			// longer-content merge on success — see mergeOxBrowserResult), so the
+			// leg is not wasted; it was just unmeasured.
+			oxStart := time.Now()
 			ox, err := e.oxBrowser.Extract(ctx, item.URL)
+			e.metrics.phaseTiming(PhaseHomepageOxBrowser, time.Since(oxStart).Seconds())
 			if err != nil {
 				e.logger.DebugContext(ctx, "enriche: ox-browser failed", "url", item.URL, "err", err)
 				oxCh <- nil
