@@ -8,8 +8,8 @@ require (
 	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/anatolykoptev/go-engine v1.42.0
 	github.com/anatolykoptev/go-imagefy v0.1.1
-	github.com/anatolykoptev/go-kit v0.95.0
-	github.com/anatolykoptev/go-stealth v1.15.0
+	github.com/anatolykoptev/go-kit v0.96.0
+	github.com/anatolykoptev/go-stealth v1.18.0
 	github.com/astappiev/microdata v1.0.2
 	github.com/markusmobius/go-trafilatura v1.12.2
 	github.com/redis/go-redis/v9 v9.18.0
