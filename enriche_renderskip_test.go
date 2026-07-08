@@ -52,6 +52,20 @@ func findSiteNumber(nums []extract.PhoneNumberFact, substr string) *extract.Phon
 	return nil
 }
 
+// mustFindSiteNumber returns the SiteNumber whose value contains substr, or
+// fails the test. Centralizing the nil-guard here lets call sites read the
+// returned (guaranteed-non-nil) fact directly, avoiding the nil-check-then-
+// dereference pattern staticcheck flags as SA5011 (it does not model t.Fatalf
+// as terminal at each call site).
+func mustFindSiteNumber(t *testing.T, nums []extract.PhoneNumberFact, substr string) *extract.PhoneNumberFact {
+	t.Helper()
+	n := findSiteNumber(nums, substr)
+	if n == nil {
+		t.Fatalf("SiteNumbers missing a number containing %q; got %+v", substr, nums)
+	}
+	return n
+}
+
 // --- Fixtures (mcmedok-class: the real SPb branch phone lives ONLY in an
 // inline-script branch-locator JSON, invisible to the single-winner Facts.Phone
 // and thus to hasContactFacts, so the OLD gate rendered needlessly). ---
@@ -166,10 +180,7 @@ func TestEnrich_RenderSkip_HomepageAnchoredRawSufficient_SkipsRender(t *testing.
 	if !result.RenderSkipped {
 		t.Fatal("Result.RenderSkipped = false, want true (the render was trust-skipped)")
 	}
-	n := findSiteNumber(result.SiteNumbers, "767-36-61")
-	if n == nil {
-		t.Fatalf("SiteNumbers missing the branch-JSON 812 number the skip preserved; got %+v", result.SiteNumbers)
-	}
+	n := mustFindSiteNumber(t, result.SiteNumbers, "767-36-61")
 	if !n.Anchored || !n.Trustworthy || n.Source != "branch_json" {
 		t.Fatalf("preserved number = %+v, want Anchored+Trustworthy+branch_json", *n)
 	}
@@ -235,10 +246,7 @@ func TestEnrich_RenderSkip_HomepagePoisonedAnchored_StillRenders(t *testing.T) {
 	if result.RenderSkipped {
 		t.Fatal("Result.RenderSkipped = true on a poisoned page, want false")
 	}
-	n := findSiteNumber(result.SiteNumbers, "767-36-61")
-	if n == nil {
-		t.Fatalf("SiteNumbers missing the branch-JSON number; got %+v", result.SiteNumbers)
-	}
+	n := mustFindSiteNumber(t, result.SiteNumbers, "767-36-61")
 	if !n.DNI || n.Trustworthy {
 		t.Fatalf("poisoned number = %+v, want DNI=true Trustworthy=false (poison protection holds)", *n)
 	}
@@ -272,10 +280,7 @@ func TestEnrich_RenderSkip_HomepageUnlistedDNIAnchored_DocumentsResidualGap(t *t
 	if !result.RenderSkipped {
 		t.Fatal("Result.RenderSkipped = false, want true (the render was skipped — the residual gap)")
 	}
-	n := findSiteNumber(result.SiteNumbers, "767-36-61")
-	if n == nil {
-		t.Fatalf("SiteNumbers missing the branch-JSON number; got %+v", result.SiteNumbers)
-	}
+	n := mustFindSiteNumber(t, result.SiteNumbers, "767-36-61")
 	if n.DNI || !n.Trustworthy {
 		t.Fatalf("number = %+v; today an UNLISTED vendor leaves it DNI=false Trustworthy=true (the documented gap)", *n)
 	}
@@ -384,10 +389,7 @@ func TestEnrich_RenderSkip_ContactsPoisonedAnchored_StillRenders(t *testing.T) {
 	if skips != 0 {
 		t.Fatalf("OnBrowserRenderSkipped fired %d times on a poisoned contacts page, want 0", skips)
 	}
-	n := findSiteNumber(result.SiteNumbers, "767-36-61")
-	if n == nil {
-		t.Fatalf("SiteNumbers missing the contacts branch-JSON number; got %+v", result.SiteNumbers)
-	}
+	n := mustFindSiteNumber(t, result.SiteNumbers, "767-36-61")
 	if !n.DNI || n.Trustworthy {
 		t.Fatalf("poisoned contacts number = %+v, want DNI=true Trustworthy=false", *n)
 	}
