@@ -339,3 +339,26 @@ func TestIsJSExecutableScript(t *testing.T) {
 		})
 	}
 }
+
+// TestJSStringLiteralAssignments_TrailingUnterminated_KeepsPriorLiterals locks
+// the analysis behind the "unterminated literal" break in
+// jsStringLiteralAssignments: a well-formed literal FOLLOWED BY a trailing
+// unterminated one must still yield the well-formed one. The break is reachable
+// only at EOF (the unterminated literal runs to end-of-text, so nothing
+// terminated can follow), so it can never drop a following valid literal — this
+// guards that property (and the harvest-then-break order) against a future
+// scanner refactor.
+func TestJSStringLiteralAssignments_TrailingUnterminated_KeepsPriorLiterals(t *testing.T) {
+	got := jsStringLiteralAssignments(`var a = "keepme"; var b = "unterminated to eof`)
+	if len(got) != 1 || got[0] != "keepme" {
+		t.Fatalf("jsStringLiteralAssignments = %q, want [keepme] (a prior valid literal must survive a trailing unterminated one)", got)
+	}
+}
+
+// TestJSStringLiteralAssignments_SoleUnterminated_NoPanic verifies a single
+// unterminated literal yields nothing and does not panic or hang.
+func TestJSStringLiteralAssignments_SoleUnterminated_NoPanic(t *testing.T) {
+	if got := jsStringLiteralAssignments(`var a = "no closing quote`); len(got) != 0 {
+		t.Fatalf("jsStringLiteralAssignments = %q, want empty for a sole unterminated literal", got)
+	}
+}
