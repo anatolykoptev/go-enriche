@@ -3,6 +3,7 @@ package enriche
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 )
@@ -43,6 +44,50 @@ func TestMetrics_PhaseTiming(t *testing.T) {
 	}
 	if seen[PhaseTotal] == 0 {
 		t.Errorf("OnPhaseTiming never fired for %q; seen=%v", PhaseTotal, seen)
+	}
+}
+
+// TestMetrics_PhaseTiming_OxBrowser proves the ox-browser leg emits its own
+// phase timing (homepage_ox_browser) when an ox-browser is configured — the leg
+// that was previously the only fetch leg with no timing. It runs in parallel
+// with homepage_fetch, but Enrich consumes its result before returning, so the
+// emission is deterministic by the time Enrich returns. Revert the
+// e.metrics.phaseTiming(PhaseHomepageOxBrowser, ...) line in enriche_fetch.go
+// and this goes RED.
+func TestMetrics_PhaseTiming_OxBrowser(t *testing.T) {
+	t.Parallel()
+	srv := newTestServer(testHTML, http.StatusOK)
+	defer srv.Close()
+
+	// Minimal ox-browser /read endpoint returning a readability result.
+	oxSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"content":"ox readability body text","title":"T"}`))
+	}))
+	defer oxSrv.Close()
+
+	var mu sync.Mutex
+	seen := map[string]int{}
+	m := &Metrics{
+		OnPhaseTiming: func(phase string, seconds float64) {
+			if seconds < 0 {
+				t.Errorf("phase %q reported negative seconds %v", phase, seconds)
+			}
+			mu.Lock()
+			seen[phase]++
+			mu.Unlock()
+		},
+	}
+
+	e := newTestEnricher(WithFetcher(testFetcher()), WithMetrics(m), WithOxBrowser(oxSrv.URL))
+	if _, err := e.Enrich(context.Background(), Item{Name: "P", URL: srv.URL, Mode: ModePlaces}); err != nil {
+		t.Fatalf("Enrich: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if seen[PhaseHomepageOxBrowser] == 0 {
+		t.Errorf("OnPhaseTiming never fired for %q; seen=%v", PhaseHomepageOxBrowser, seen)
 	}
 }
 

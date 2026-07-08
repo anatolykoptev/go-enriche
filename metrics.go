@@ -91,9 +91,11 @@ type Metrics struct {
 
 	// OnPhaseTiming fires once per instrumented enrichment phase with the phase
 	// name (one of the Phase* consts) and its wall-clock duration in seconds.
-	// Phases: homepage_fetch / homepage_render / contacts_fetch / contacts_render
-	// (each emitted only when that leg actually runs) and total (the whole
-	// Enrich() wall-clock, recorded even on a cache-hit early return). Lets the
+	// Phases: homepage_fetch / homepage_ox_browser / homepage_render /
+	// contacts_fetch / contacts_render (each emitted only when that leg actually
+	// runs) and total (the whole Enrich() wall-clock, recorded even on a
+	// cache-hit early return). homepage_ox_browser runs in PARALLEL with
+	// homepage_fetch, so it overlaps rather than adding to total. Lets the
 	// consumer build a per-phase latency histogram (e.g.
 	// gowp_wp_enrich_phase_seconds{phase}) to see WHERE enrich time goes. The
 	// maps-check leg is intentionally NOT timed here — it has its own
@@ -105,11 +107,12 @@ type Metrics struct {
 // histogram labels (gowp_wp_enrich_phase_seconds{phase}) share one vocabulary
 // with the emitter and cannot drift.
 const (
-	PhaseHomepageFetch  = "homepage_fetch"
-	PhaseHomepageRender = "homepage_render"
-	PhaseContactsFetch  = "contacts_fetch"
-	PhaseContactsRender = "contacts_render"
-	PhaseTotal          = "total"
+	PhaseHomepageFetch     = "homepage_fetch"
+	PhaseHomepageOxBrowser = "homepage_ox_browser"
+	PhaseHomepageRender    = "homepage_render"
+	PhaseContactsFetch     = "contacts_fetch"
+	PhaseContactsRender    = "contacts_render"
+	PhaseTotal             = "total"
 )
 
 func (m *Metrics) cacheHit() {
