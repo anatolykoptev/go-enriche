@@ -489,9 +489,14 @@ func TestCacheKey(t *testing.T) {
 		item Item
 		want string
 	}{
-		{Item{URL: "https://example.com"}, "enriche:v2:https://example.com:seed:none"},
-		{Item{Name: "Test"}, "enriche:search:v2:Test:seed:none"},
-		{Item{Name: "Place", URL: "https://place.com"}, "enriche:v2:https://place.com:seed:none"},
+		{Item{URL: "https://example.com"}, "enriche:v3:https://example.com:seed:none"},
+		{Item{Name: "Test"}, "enriche:search:v3:Test:seed:none"},
+		{Item{Name: "Place", URL: "https://place.com"}, "enriche:v3:https://place.com:seed:none"},
+		// SkipMapsCheck produces a DISTINCT key (:nomaps suffix) so a maps-less
+		// verify blob is never served to a maps-check-on enrich caller; the
+		// skip=false cases above prove the common path stays unsuffixed.
+		{Item{URL: "https://example.com", SkipMapsCheck: true}, "enriche:v3:https://example.com:seed:none:nomaps"},
+		{Item{Name: "Test", SkipMapsCheck: true}, "enriche:search:v3:Test:seed:none:nomaps"},
 	}
 	for _, tt := range tests {
 		got := cacheKey(tt.item)

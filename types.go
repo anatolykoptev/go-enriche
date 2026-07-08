@@ -28,11 +28,16 @@ type Item struct {
 
 	// SkipMapsCheck is a verify-path lever — when true it suppresses the
 	// ModePlaces maps closure-check (checkMapsStatus / mapsChecker.Check).
-	// The maps result only feeds Facts.Phone (sourceMaps) and the closure
-	// status, neither of which a SiteNumbers-membership verifier reads, so a
-	// verify caller can skip the maps round-trip with no effect on its
-	// verdict. wp_enrich (ModePlaces) leaves it false — the maps-check still
-	// runs there. Default-false is byte-identical for every existing caller.
+	// Suppressing it drops BOTH the closure status (StatusClosed /
+	// StatusTemporaryClosed) AND every field mergeOrg writes at sourceMaps:
+	// place name, address, phone, website, hours, and coordinates (resolve.go).
+	// A SiteNumbers-membership verifier reads none of those (it consults only
+	// the site's own candidate phone set), so a verify caller's VERDICT is
+	// unaffected — but the enriched RESULT genuinely differs, which is why
+	// SkipMapsCheck is part of the cache identity (cacheKey, enriche.go): a
+	// skip=true blob must never be served to a skip=false caller.
+	// wp_enrich (ModePlaces) leaves it false — the maps-check still runs there.
+	// Default-false is byte-identical for every existing caller.
 	SkipMapsCheck bool
 
 	// Latitude and Longitude are authoritative coordinates provided by the
