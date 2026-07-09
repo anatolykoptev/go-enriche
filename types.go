@@ -115,6 +115,30 @@ type Result struct {
 	// enforce that property. Zero value (false) = a successful render corroborated
 	// the page (or none was avoidable).
 	RenderSkipped bool
+
+	// TLSFallbackUsed is true when EITHER the homepage OR the discovered
+	// /contacts subpage (see resolveContactsPage) was recovered through
+	// fetch.Fetcher's TLS-cert-error fallback (fetch.FetchResult.
+	// TLSFallbackUsed — see that field's doc comment) instead of a normal
+	// HTTPS fetch: the origin's certificate failed validation (hostname
+	// mismatch, untrusted CA, ...) but a plain-HTTP retry through the same
+	// SSRF-guarded transport recovered real content. OR'd across both legs —
+	// same fail-closed reasoning, and the same OR pattern, as RenderSkipped
+	// above — because either leg alone can be the one that supplied the
+	// value a caller ends up using.
+	//
+	// This is the additive, backward-compatible signal go-wp's follow-up
+	// task consumes to distinguish a "reachable, cert broken" site from a
+	// truly unreachable one (see Status == StatusTLSInvalid for the case
+	// where NEITHER the primary fetch NOR the fallback produced content).
+	// Same fail-closed contract as RenderSkipped: a field resolved on a
+	// TLSFallbackUsed result MUST NOT be auto-applied to a paid/live card
+	// without human confirmation (a wrong-cert page could serve
+	// attacker-controlled content). This code does NOT yet enforce that
+	// property — enforcement is the go-wp Correctable-gate follow-up. Zero
+	// value (false) = every fetch behind this result validated its cert
+	// normally.
+	TLSFallbackUsed bool
 }
 
 // FieldProvenance is the resolved provenance of one fact: the winning source
@@ -159,6 +183,9 @@ const (
 	StatusWebsiteDown     = fetch.StatusWebsiteDown
 	StatusClosed          = fetch.StatusClosed
 	StatusTemporaryClosed = fetch.StatusTemporaryClosed
+	// StatusTLSInvalid is fetch.StatusTLSInvalid re-exported — see its doc
+	// comment (fetch/status.go) and Result.TLSFallbackUsed above.
+	StatusTLSInvalid = fetch.StatusTLSInvalid
 )
 
 // ContentMeta holds article metadata extracted by trafilatura.
