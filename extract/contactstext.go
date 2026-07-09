@@ -125,6 +125,17 @@ func contactsTextCandidates(doc *goquery.Document, existing []phoneCandidate) []
 		if scope.Closest(callTrackingSelectors).Length() > 0 {
 			return
 		}
+		// Role-label context is read from the LIVE `scope` node — not the
+		// in-hand phone-label node `s` (rePhoneLabel only anchors on a
+		// phone-token word like «Тел.», never a role/department word) and
+		// not the detached, noise-stripped `harvest` clone computed below
+		// (Parent()/PrevAll() cannot walk a cloned, detached node). One
+		// role-label lookup covers every phone match this scope yields
+		// below — a multi-number value block («+7 (812) …<br/>+7 (967) …»)
+		// shares one department context. See phoneRoleLabelText's doc
+		// comment (phonerole.go) for why this is a PRECEDING-context scan,
+		// not a mirror of phoneValueScope's own FOLLOWING-looking walk.
+		roleLabel := phoneRoleLabelText(scope)
 		// Gate 1 (value side) + gate 3: strip noise once, then bound the harvest
 		// to the narrowest phone-bearing node so a broad ancestor scope does not
 		// pull an unrelated far number into the set.
@@ -145,6 +156,7 @@ func contactsTextCandidates(doc *goquery.Document, existing []phoneCandidate) []
 				continue // already covered structurally, or already emitted here
 			}
 			have[key] = true
+			c.roleLabel = roleLabel
 			out = append(out, c)
 		}
 	})
