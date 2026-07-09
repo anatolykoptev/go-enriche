@@ -2,6 +2,8 @@ package extract
 
 import (
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/PuerkitoBio/goquery"
 )
@@ -20,6 +22,18 @@ const (
 	roleGeneral      PhoneRole = ""
 	roleDepartmental PhoneRole = "departmental"
 )
+
+// IsDepartmental reports whether r is the non-public departmental role — the
+// EXPORTED predicate a downstream consumer (go-wp's card-phone picker, task
+// A2) should gate on, instead of comparing against an unexported PhoneRole
+// constant or a magic "departmental" string. roleGeneral/roleDepartmental
+// stay unexported on purpose: PhoneNumberFact.RoleLabelRaw is the durable
+// raw signal a caller may want to inspect verbatim, while the
+// CLASSIFICATION itself is meant to be consumed only through this
+// compile-checked method, not by matching a literal.
+func (r PhoneRole) IsDepartmental() bool {
+	return r == roleDepartmental
+}
 
 // maxRoleLabelRunes caps PhoneNumberFact.RoleLabelRaw (see its doc comment,
 // sitenumbers.go). Bounds a pathological long preceding-sibling block (e.g.
@@ -104,18 +118,39 @@ func phoneRoleLabelText(node *goquery.Selection) string {
 }
 
 // precedingSiblingRoleText returns the noise-stripped, trimmed text of the
-// closest non-empty PRECEDING sibling of n (via PrevAll, closest-first), or
-// "" when n has no preceding sibling carrying any text (e.g. a leaf <svg>
-// icon, which stripNoiseClone removes wholesale).
+// closest QUALIFYING PRECEDING sibling of n (via PrevAll, closest-first), or
+// "" when none qualifies within n's sibling list.
+//
+// A sibling qualifies only when it carries NO phone of its own (rePhone).
+// This is the review-round-1 BLOCKER fix (cross-block contamination): the
+// common "departments as sibling blocks" RU venue layout —
+//
+//	<div>Бухгалтерия: <a href="tel:+7...">…</a></div>
+//	<div>Телефон: <a href="tel:+7...">…</a></div>
+//
+// — has the SECOND div's phone climb to its own <div>, find the FIRST div
+// as its closest preceding sibling, and (before this fix) read its whole
+// text "Бухгалтерия: +7 …" as a role label — wrongly demoting the second,
+// unrelated general line. A sibling that itself contains a phone is a
+// DIFFERENT number's label+value block, not a role-only heading for n — a
+// genuine role heading carries no phone token of its own (see
+// phoneRoleLabelText's own doc comment on this exact point). Such a sibling
+// is skipped and the scan keeps looking further back for one that
+// qualifies, rather than treating the whole ancestor level as unusable —
+// an inline same-element ownText prefix (checked separately by
+// phoneRoleLabelText) is unaffected by this guard.
 func precedingSiblingRoleText(n *goquery.Selection) string {
 	var found string
 	n.PrevAll().EachWithBreak(func(_ int, sib *goquery.Selection) bool {
 		t := strings.TrimSpace(stripNoiseClone(sib).Text())
-		if t != "" {
-			found = t
-			return false
+		if t == "" {
+			return true // no text here — keep looking further back
 		}
-		return true
+		if rePhone.MatchString(t) {
+			return true // a DIFFERENT phone's own block — not a role label for n
+		}
+		found = t
+		return false
 	})
 	return found
 }
@@ -145,19 +180,76 @@ func precedingSiblingRoleText(n *goquery.Selection) string {
 // line, not away from it), "диспетчер", "администратор", "ресепшн",
 // "справочная", "горячая линия", "единый номер", "call-центр", "запись",
 // "бронирование" (all commonly ARE the venue's own general/booking line).
+//
+// ALSO deliberately EXCLUDED as of review round 1 (MAJOR-2, real substring
+// collisions with common venue types/business words a city guide indexes):
+// bare "оптом" (⊂ «оптометрия»/«оптометрист» — optometry clinics are a
+// common venue type), bare "снабжение" (⊂ «водоснабжение»/«теплоснабжение»/
+// «электроснабжение» — utility-company names), bare "закупки" (⊂
+// «госзакупки»). The FRAMED forms that already cover the real departmental
+// cases stay: "отдел закупок", "оптовый отдел", "оптовый прайс" — long
+// enough that they do not collide with any of the above.
 var departmentalLabelTokens = []string{
 	// Tier A.
-	"факс", "fax", "бухгалтер", "отдел кадров", "кадровая служба",
+	"бухгалтер", "отдел кадров", "кадровая служба",
 	"отдел персонала", "юридический отдел", "юротдел", "юрслужба",
 	"пресс-служба", "пресс-центр", "для сми", "для прессы",
-	"отдел закупок", "закупки", "снабжение", "претензи",
-	"оптовый отдел", "оптом", "приёмная директора", "приемная директора",
+	"отдел закупок", "претензи",
+	"оптовый отдел", "приёмная директора", "приемная директора",
 	// Tier B (multiword frames only — see doc comment above).
 	"по вопросам аренды", "вопросам аренды", "аренда мест", "аренды мест",
 	"аренда помещен", "аренды помещен", "аренда площад", "аренды площад",
 	"аренда торгов", "аренды торгов", "по вопросам сотрудничества",
 	"по вопросам поставок", "для поставщиков", "для партнёров",
 	"для партнеров", "оптовый прайс",
+}
+
+// departmentalBoundaryTokens are short Tier-A tokens that are real
+// substrings of an unrelated common word — «факс» ⊂ «факсимиле», "fax" ⊂
+// "telefax"/"faxes" — so plain strings.Contains would false-demote a
+// facsimile-machine/service mention. Matched via containsWordToken
+// (letter-bounded on both sides) instead of departmentalLabelTokens' plain
+// Contains.
+//
+// NOT matched via a regexp `\b` word-boundary anchor: Go's regexp package
+// (RE2) defines `\b` as an ASCII word boundary only (`\w` = [0-9A-Za-z_]) —
+// it does NOT recognize a Cyrillic letter as a "word" character, so
+// `\bфакс\b` never reliably anchors on Cyrillic text (this is why
+// rePhoneLabel, contactstext.go, anchors its Cyrillic arms via trailing
+// punctuation instead of \b, and reserves \b for its Latin arms only).
+// containsWordToken implements the boundary check manually via
+// unicode.IsLetter on the runes immediately surrounding each match, which
+// works uniformly for both scripts.
+var departmentalBoundaryTokens = []string{"факс", "fax"}
+
+// containsWordToken reports whether haystack contains tok as a
+// LETTER-BOUNDED occurrence: the rune immediately before and after the
+// match (if any) must NOT be a Unicode letter. See departmentalBoundaryTokens'
+// doc comment for why this is hand-rolled instead of a regexp \b anchor.
+func containsWordToken(haystack, tok string) bool {
+	if tok == "" {
+		return false
+	}
+	for {
+		i := strings.Index(haystack, tok)
+		if i < 0 {
+			return false
+		}
+		beforeOK := i == 0
+		if !beforeOK {
+			r, _ := utf8.DecodeLastRuneInString(haystack[:i])
+			beforeOK = !unicode.IsLetter(r)
+		}
+		afterOK := i+len(tok) >= len(haystack)
+		if !afterOK {
+			r, _ := utf8.DecodeRuneInString(haystack[i+len(tok):])
+			afterOK = !unicode.IsLetter(r)
+		}
+		if beforeOK && afterOK {
+			return true
+		}
+		haystack = haystack[i+len(tok):] // keep scanning past this occurrence
+	}
 }
 
 // classifyPhoneRole classifies a phone's nearest role-label text (raw — e.g.
@@ -191,6 +283,11 @@ func classifyPhoneRole(raw string) PhoneRole {
 	low := strings.ToLower(normalizeSpaces(raw))
 	for _, tok := range departmentalLabelTokens {
 		if strings.Contains(low, tok) {
+			return roleDepartmental
+		}
+	}
+	for _, tok := range departmentalBoundaryTokens {
+		if containsWordToken(low, tok) {
 			return roleDepartmental
 		}
 	}

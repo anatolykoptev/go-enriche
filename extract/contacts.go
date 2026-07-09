@@ -340,14 +340,23 @@ type phoneCandidate struct {
 	areaCode    int // 3-digit RU area code, or -1
 	// roleLabel is the nearest human role/label text found near this
 	// candidate's DOM node (phoneRoleLabelText, phonerole.go) — e.g. a
-	// leasing-desk heading. "" when the finder has no DOM node to scan
-	// (branchJSONCandidates/schemaPlaceCandidates/ogPhoneCandidates read
-	// structured JSON/meta, not a labeled DOM region) or when none was
-	// found nearby. Set at find-time by telCandidates/microdataCandidates
-	// (this file) and contactsTextCandidates (contactstext.go) — the three
-	// finders that have a live DOM node to scan. CollectSiteNumbers
-	// (sitenumbers.go) copies it into PhoneNumberFact.RoleLabelRaw and
-	// classifies it into PhoneNumberFact.Role.
+	// leasing-desk heading. Set at find-time by telCandidates/
+	// microdataCandidates (this file) and contactsTextCandidates
+	// (contactstext.go). "" (⇒ Role=roleGeneral) when:
+	//   - the finder has no DOM node to scan at all — branchJSONCandidates/
+	//     schemaPlaceCandidates/ogPhoneCandidates read structured JSON/meta,
+	//     not a labeled DOM region;
+	//   - socialLinkCandidates (this file) DOES have a live DOM node (the
+	//     wa.me/api.whatsapp.com anchor) but is deliberately NOT scanned: a
+	//     WhatsApp click-to-chat link's surrounding text is never a
+	//     department/desk context in practice, and leaving roleLabel unset
+	//     here is fail-safe (unset ⇒ general, never a wrong departmental
+	//     demotion of a DNI-immune social-link number — the package's
+	//     strongest phone-trust tier);
+	//   - or none was found nearby for a finder that DID scan.
+	// CollectSiteNumbers (sitenumbers.go) copies it into
+	// PhoneNumberFact.RoleLabelRaw and classifies it into
+	// PhoneNumberFact.Role.
 	roleLabel string
 }
 

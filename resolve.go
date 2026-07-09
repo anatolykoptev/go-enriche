@@ -447,11 +447,28 @@ func (r *resolver) addSiteNumbers(nums []extract.PhoneNumberFact, city string) {
 	// call is the incremental form of the same "same key, keep the
 	// strongest reading" rule, so the two no longer hand-roll independent
 	// copies of it.
+	// Built as a fresh slice (not append(r.siteNumbers, tagged...) reassigned
+	// elsewhere) so `all` never aliases r.siteNumbers' backing array — needed
+	// below since `all` must stay valid as the OR-reduce input AFTER
+	// r.siteNumbers is reassigned to DedupeKeepStronger's own output slice.
+	all := make([]extract.PhoneNumberFact, 0, len(r.siteNumbers)+len(tagged))
+	all = append(all, r.siteNumbers...)
+	all = append(all, tagged...)
 	r.siteNumbers = extract.DedupeKeepStronger(
-		append(r.siteNumbers, tagged...),
+		all,
 		func(n extract.PhoneNumberFact) string { return extract.DigitsOnly(n.Value) },
 		siteNumberRank,
 	)
+	// Role must NOT ride the tier/trust merge above (review round 1,
+	// MAJOR-3 — see extract.ReduceRoleGeneralWins' doc comment): a number
+	// that reads GENERAL on ANY page (e.g. the homepage) must stay general
+	// even when a LATER page's higher-rank reading (e.g. a discovered
+	// /contacts subpage) wins the merge with a departmental label — the
+	// demotion must not "re-enter at the resolver" after
+	// CollectSiteNumbers' own per-page dedup already got it right.
+	// `all` (pre-merge, this call's accumulated history) is the OR-reduce
+	// input; r.siteNumbers (post-merge) is fixed up in place.
+	extract.ReduceRoleGeneralWins(r.siteNumbers, all)
 }
 
 // siteNumbersSnapshot returns the accumulated SiteNumbers set in a stable,

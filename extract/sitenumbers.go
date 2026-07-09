@@ -81,11 +81,13 @@ type PhoneNumberFact struct {
 	// inline department prefix («Отдел кадров. Телефон:»). Noise-stripped,
 	// whitespace-normalized, and length-capped to ~120 chars, kept close to
 	// verbatim (not further paraphrased) for a downstream LLM consumer. ""
-	// when no role/label text was found nearby, or when the finder has no
-	// DOM node to scan at all (branchJSONCandidates/schemaPlaceCandidates/
+	// when no role/label text was found nearby, when the finder has no DOM
+	// node to scan at all (branchJSONCandidates/schemaPlaceCandidates/
 	// ogPhoneCandidates read structured JSON/meta, not a labeled DOM
-	// region) — in both cases Role is roleGeneral (see its doc comment:
-	// unlabeled never demotes).
+	// region), or when the finder deliberately does not scan one
+	// (socialLinkCandidates — see phoneCandidate.roleLabel's doc comment,
+	// contacts.go) — in every case Role is roleGeneral (see its doc
+	// comment: unlabeled never demotes).
 	RoleLabelRaw string
 	// Role classifies RoleLabelRaw via classifyPhoneRole (phonerole.go) into
 	// a binary general/departmental verdict, so a downstream consumer (e.g.
@@ -280,7 +282,73 @@ func CollectSiteNumbers(doc *goquery.Document, pagePoisoned bool) []PhoneNumberF
 	for i, k := range out {
 		facts[i] = k.fact
 	}
+	// Role must NOT ride the tier-trust merge blindly (review round 1,
+	// MAJOR-3): a lower-tier reading (e.g. contactsText/tierBody) winning
+	// the merge on Value/Source/Anchored/Trustworthy must not silently
+	// carry a departmental misread over a co-existing higher-signal general
+	// reading (e.g. a tierMicrodata itemprop=telephone) for the SAME
+	// digits. `tagged` (pre-dedup, every candidate reading) is the OR-reduce
+	// input; `facts` (post-dedup, one entry per digits key) is fixed up in
+	// place.
+	all := make([]PhoneNumberFact, len(tagged))
+	for i, k := range tagged {
+		all[i] = k.fact
+	}
+	ReduceRoleGeneralWins(facts, all)
 	return facts
+}
+
+// ReduceRoleGeneralWins adjusts `out` (an already tier/trust-deduped
+// []PhoneNumberFact, one entry per distinct DigitsOnly(Value) key) IN PLACE
+// so Role/RoleLabelRaw are decoupled from the tier/trust merge
+// DedupeKeepStronger performs on every OTHER field: for each entry, if ANY
+// reading in `all` (the FULL pre-dedup set, before DedupeKeepStronger
+// collapsed it) sharing its digits key was roleGeneral, the entry's
+// Role/RoleLabelRaw are forced to that general reading — even when a
+// DIFFERENT, lower-precision reading won the tier/trust merge with a
+// departmental label. In other words: a number that reads GENERAL from ANY
+// reading stays general; it classifies departmental only when EVERY
+// reading for that number does.
+//
+// Why this must be separate from rankFn: DedupeKeepStronger's tier-wins
+// rule is correct and desired for Value/Source/Anchored/Trustworthy — the
+// STRONGEST evidence for the number's trust/region should win. But Role
+// answers a DIFFERENT question ("is this number ever safe to treat as
+// public"), and a strong "this IS the public line" signal (e.g. a clean
+// itemprop=telephone reading) must never be silently overridden just
+// because a separate, lower-tier reading of the SAME number happened to
+// rank higher on the trust axis and carried a departmental-looking nearby
+// label.
+//
+// Shared by CollectSiteNumbers (above) and the enriche resolver's
+// addSiteNumbers (resolve.go) — both dedupe PhoneNumberFact-shaped
+// candidates by digits and need the SAME OR-toward-general reduction across
+// their respective pre-dedup sets, so neither hand-rolls an independent
+// copy. First-general-found-in-`all`-order wins the RoleLabelRaw text when
+// multiple general readings exist for the same key — deterministic given
+// `all`'s own deterministic order (both call sites build it from a fixed
+// DOM/accumulation order, never Go's randomized map iteration).
+func ReduceRoleGeneralWins(out, all []PhoneNumberFact) {
+	generalRaw := make(map[string]string, len(all))
+	for _, f := range all {
+		if f.Role != roleGeneral {
+			continue
+		}
+		key := DigitsOnly(f.Value)
+		if key == "" {
+			continue
+		}
+		if _, ok := generalRaw[key]; !ok {
+			generalRaw[key] = f.RoleLabelRaw
+		}
+	}
+	for i := range out {
+		key := DigitsOnly(out[i].Value)
+		if raw, ok := generalRaw[key]; ok {
+			out[i].Role = roleGeneral
+			out[i].RoleLabelRaw = raw
+		}
+	}
 }
 
 // DedupeKeepStronger merges items into a deduped slice keyed by keyFn: on a

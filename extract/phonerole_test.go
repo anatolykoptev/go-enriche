@@ -79,6 +79,65 @@ func TestClassifyPhoneRole_Golden(t *testing.T) {
 			raw:  "бронирование столиков",
 			want: roleGeneral,
 		},
+		// Lexicon substring false-demote regression guards (review round 1,
+		// MAJOR-2): бare Tier-A stems that are real substrings of common
+		// unrelated venue-type/business words must NOT fire.
+		{
+			name: "optometry_clinic_stays_general",
+			raw:  "Оптометрия",
+			want: roleGeneral,
+		},
+		{
+			name: "optometry_center_stays_general",
+			raw:  "Центр оптометрии",
+			want: roleGeneral,
+		},
+		{
+			name: "water_utility_stays_general",
+			raw:  "Водоснабжение",
+			want: roleGeneral,
+		},
+		{
+			name: "electricity_utility_stays_general",
+			raw:  "Электроснабжение",
+			want: roleGeneral,
+		},
+		{
+			name: "heating_utility_stays_general",
+			raw:  "Теплоснабжение",
+			want: roleGeneral,
+		},
+		{
+			name: "state_procurement_stays_general",
+			raw:  "Госзакупки",
+			want: roleGeneral,
+		},
+		{
+			name: "facsimile_word_stays_general",
+			// «факс» is a real PREFIX of «факсимиле» — must not fire via
+			// plain substring Contains; needs letter-boundary matching.
+			raw:  "Факсимильная связь",
+			want: roleGeneral,
+		},
+		{
+			name: "bare_fax_word_still_departmental",
+			// The bare, letter-bounded word "факс" must still match — the
+			// boundary fix must not become a false-negative regression.
+			raw:  "Факс",
+			want: roleDepartmental,
+		},
+		{
+			name: "fax_with_colon_still_departmental",
+			raw:  "Факс:",
+			want: roleDepartmental,
+		},
+		{
+			name: "procurement_dept_still_departmental",
+			// The FRAMED "отдел закупок" form is kept (only the bare stem
+			// "закупки" was dropped) — must still classify departmental.
+			raw:  "Отдел закупок",
+			want: roleDepartmental,
+		},
 	}
 
 	for _, tc := range cases {
@@ -233,6 +292,117 @@ func TestCollectSiteNumbers_AllUnlabeledPhonesStayGeneral(t *testing.T) {
 		if nums[i].Role != roleGeneral {
 			t.Errorf("nums[%d] = %+v, want Role=roleGeneral (unlabeled must never demote)", i, nums[i])
 		}
+	}
+}
+
+// TestPhoneRoleLabelText_PrecedingSiblingWithOwnPhone_NotBorrowed is the
+// BLOCKER (review round 1, #1) regression fixture: a preceding sibling
+// block that carries its OWN phone (a DIFFERENT number's label+value block,
+// the common "departments as sibling blocks" RU venue layout) must NOT be
+// borrowed as the role label for a later, unrelated general number.
+// «Бухгалтерия: <a>111…</a>» precedes «Телефон: <a>222…</a>» — the second
+// number's own label text ("Телефон:") carries no departmental token, and
+// the department-labeled SIBLING BLOCK belongs to the FIRST number, not the
+// second.
+func TestPhoneRoleLabelText_PrecedingSiblingWithOwnPhone_NotBorrowed(t *testing.T) {
+	t.Parallel()
+	const html = `<!doctype html><html><body>
+<div>Бухгалтерия: <a href="tel:+78121111111">+7 (812) 111-11-11</a></div>
+<div>Телефон: <a href="tel:+78122222222">+7 (812) 222-22-22</a></div>
+</body></html>`
+	doc := docFromHTML(t, html)
+	node := doc.Find(`a[href="tel:+78122222222"]`).First()
+	if node.Length() == 0 {
+		t.Fatalf("fixture setup: second tel: anchor not found")
+	}
+	got := phoneRoleLabelText(node)
+	if strings.Contains(strings.ToLower(got), "бухгалтер") {
+		t.Errorf("phoneRoleLabelText = %q, borrowed the PRECEDING sibling's own phone-block label (cross-block contamination)", got)
+	}
+}
+
+// TestCollectSiteNumbers_DepartmentSiblingBlock_DoesNotContaminateNextGeneralLine
+// is the BLOCKER (review round 1, #1) end-to-end integration golden: the
+// venue's only public line (222) must NOT be wrongly demoted to
+// roleDepartmental merely because a DIFFERENT department's phone block
+// («Бухгалтерия: …111…») happens to sit as its preceding DOM sibling. If
+// 222 is the venue's sole public line, a downstream card-phone picker that
+// skips departmental numbers must not end up with NO phone at all.
+func TestCollectSiteNumbers_DepartmentSiblingBlock_DoesNotContaminateNextGeneralLine(t *testing.T) {
+	t.Parallel()
+	const html = `<!doctype html><html><body>
+<div>Бухгалтерия: <a href="tel:+78121111111">+7 (812) 111-11-11</a></div>
+<div>Телефон: <a href="tel:+78122222222">+7 (812) 222-22-22</a></div>
+</body></html>`
+	doc := docFromHTML(t, html)
+	nums := CollectSiteNumbers(doc, false)
+
+	accounting := findByValueSubstring(nums, "111-11-11")
+	if accounting == nil {
+		t.Fatalf("accounting candidate missing; got %+v", nums)
+	}
+	if accounting.Role != roleDepartmental {
+		t.Errorf("accounting candidate (111-11-11) Role = %q, want roleDepartmental (its OWN label)", accounting.Role)
+	}
+
+	general := findByValueSubstring(nums, "222-22-22")
+	if general == nil {
+		t.Fatalf("general candidate missing; got %+v", nums)
+	}
+	if general.Role != roleGeneral {
+		t.Errorf("general candidate (222-22-22) Role = %q, want roleGeneral — must NOT borrow the PRECEDING accounting block's label (cross-block contamination)", general.Role)
+	}
+}
+
+// TestCollectSiteNumbers_DedupSameNumber_GeneralReadingWinsRoleOverDepartmentalTierWinner
+// is the MAJOR (review round 1, #3) dedup regression golden: the SAME
+// digits are found TWICE on one page — once via a low-tier general reading
+// (body prose, no role context) and once via a HIGHER-tier departmental
+// reading (a contacts-region tel: under a preceding department heading).
+// DedupeKeepStronger's tier-wins merge legitimately keeps the higher-tier
+// reading's Value/Source/Anchored/Trustworthy — but Role must NOT ride
+// along blindly: a number that reads GENERAL from ANY reading must stay
+// general, since a strong "this is the public line" signal must never be
+// silently overridden by a lower-precision reading's departmental misread
+// just because that reading happened to win on an unrelated axis (DOM
+// region tier).
+func TestCollectSiteNumbers_DedupSameNumber_GeneralReadingWinsRoleOverDepartmentalTierWinner(t *testing.T) {
+	t.Parallel()
+	const html = `<!doctype html><html><body>
+<article><p>Иногда до нас можно дозвониться по номеру <a href="tel:+78121234567">+7 (812) 123-45-67</a> в рабочее время.</p></article>
+<header>
+  <div class="h6">Отдел закупок</div>
+  <a href="tel:+78121234567">+7 (812) 123-45-67</a>
+</header>
+</body></html>`
+	doc := docFromHTML(t, html)
+	nums := CollectSiteNumbers(doc, false)
+
+	if len(nums) != 1 {
+		t.Fatalf("len(nums) = %d, want 1 (same digits deduped); got %+v", len(nums), nums)
+	}
+	if nums[0].Role != roleGeneral {
+		t.Errorf("deduped candidate Role = %q (RoleLabelRaw=%q), want roleGeneral — the tier-winning departmental reading must not override the co-existing general reading", nums[0].Role, nums[0].RoleLabelRaw)
+	}
+	// Sanity: the tier-winning reading really is the contacts-region one
+	// (Anchored=true), proving this isn't vacuously passing because the
+	// general reading also happened to win the tier merge.
+	if !nums[0].Anchored {
+		t.Errorf("deduped candidate Anchored = false, want true (the contacts-region tel: reading should still win the tier/trust merge for the non-Role fields)")
+	}
+}
+
+// TestPhoneRole_IsDepartmental is the exported-predicate seam (review round
+// 1, #5): a downstream consumer (go-wp's card-phone picker, task A2) must
+// be able to gate on Role without comparing against an unexported
+// PhoneRole constant.
+func TestPhoneRole_IsDepartmental(t *testing.T) {
+	t.Parallel()
+	if roleGeneral.IsDepartmental() {
+		t.Errorf("roleGeneral.IsDepartmental() = true, want false")
+	}
+	if !roleDepartmental.IsDepartmental() {
+		t.Errorf("roleDepartmental.IsDepartmental() = false, want true")
 	}
 }
 
