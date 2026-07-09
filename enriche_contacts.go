@@ -61,9 +61,12 @@ func (e *Enricher) resolveContactsPage(ctx context.Context, item Item, result *R
 	e.metrics.contactsPageDiscovered()
 	e.logger.DebugContext(ctx, "enriche: contacts page discovered", "name", item.Name, "url", contactsURL)
 
-	contactsHTML, rawPoisoned, contactsRenderSkipped, contactsSiteNumbers := e.fetchContactsHTML(ctx, contactsURL, item)
+	contactsHTML, rawPoisoned, contactsRenderSkipped, contactsTLSFallbackUsed, contactsSiteNumbers := e.fetchContactsHTML(ctx, contactsURL, item)
 	if contactsRenderSkipped {
 		result.RenderSkipped = true
+	}
+	if contactsTLSFallbackUsed {
+		result.TLSFallbackUsed = true
 	}
 	if contactsHTML == "" {
 		return
@@ -190,12 +193,13 @@ func rawContactsSufficient(rawFacts extract.Facts, siteNumbers []extract.PhoneNu
 }
 
 // fetchContactsHTML returns the best available HTML for the contacts page, the
-// RAW fetch's DNI verdict (rawPoisoned), a renderSkipped flag, and the returned
-// page's SiteNumbers SET (collected once — see rawSiteNumbers). The HTML is the
-// raw fast fetch, upgraded to the rendered DOM when the raw page is thin or
-// carries no contact facts (the JS-injected-contacts case the contacts page is
-// most likely to be). A render that fails or returns an error shell degrades to
-// the raw HTML — a shell is never adopted. Returns ("", …) when unreachable.
+// RAW fetch's DNI verdict (rawPoisoned), a renderSkipped flag, a
+// tlsFallbackUsed flag, and the returned page's SiteNumbers SET (collected
+// once — see rawSiteNumbers). The HTML is the raw fast fetch, upgraded to the
+// rendered DOM when the raw page is thin or carries no contact facts (the
+// JS-injected-contacts case the contacts page is most likely to be). A render
+// that fails or returns an error shell degrades to the raw HTML — a shell is
+// never adopted. Returns ("", …) when unreachable.
 //
 // rawPoisoned is the PhonePoisoned verdict of the RAW contacts HTML, returned
 // separately so the caller can carry it forward even when a (clean-looking)
@@ -207,11 +211,17 @@ func rawContactsSufficient(rawFacts extract.Facts, siteNumbers []extract.PhoneNu
 // (rawContactsSufficient) OR it was attempted and failed / returned a shell and
 // degraded to raw. The caller ORs it into Result.RenderSkipped (see its doc).
 //
+// tlsFallbackUsed is true when the raw contacts fetch recovered via
+// fetch.Fetcher's TLS-cert-error fallback (fetch.FetchResult.TLSFallbackUsed)
+// rather than a normal HTTPS fetch — captured once from fr, right after the
+// fetch, since fr does not survive past this point. The caller ORs it into
+// Result.TLSFallbackUsed (see its doc), same OR pattern as renderSkipped.
+//
 // siteNumbers is CollectSiteNumbersHTML of the RETURNED html, computed once here
 // (reusing the hoisted rawSiteNumbers on every raw-HTML return) so the caller
 // need not re-parse the same page — the contacts-leg reuse mirror of
 // homeSiteNumbersFor on the homepage leg.
-func (e *Enricher) fetchContactsHTML(ctx context.Context, contactsURL string, item Item) (html string, rawPoisoned, renderSkipped bool, siteNumbers []extract.PhoneNumberFact) {
+func (e *Enricher) fetchContactsHTML(ctx context.Context, contactsURL string, item Item) (html string, rawPoisoned, renderSkipped, tlsFallbackUsed bool, siteNumbers []extract.PhoneNumberFact) {
 	contactsFetchStart := time.Now()
 	fr := e.fetchWithRetry(ctx, contactsURL)
 	e.metrics.phaseTiming(PhaseContactsFetch, time.Since(contactsFetchStart).Seconds())
@@ -219,6 +229,7 @@ func (e *Enricher) fetchContactsHTML(ctx context.Context, contactsURL string, it
 	if fr != nil && fr.Status == StatusActive {
 		rawHTML = fr.HTML
 	}
+	tlsFallbackUsed = fr != nil && fr.TLSFallbackUsed
 
 	// Extract the raw facts once: they drive the render decision below AND carry
 	// the DNI verdict the caller needs, so the poison signal survives even when a
@@ -245,7 +256,7 @@ func (e *Enricher) fetchContactsHTML(ctx context.Context, contactsURL string, it
 	// than the homepage — it is the canonical contact source, so a contactless
 	// raw contacts page is the strongest signal the contacts are JS-injected.
 	if e.browserFetch == nil {
-		return rawHTML, rawPoisoned, false, rawSiteNumbers
+		return rawHTML, rawPoisoned, false, tlsFallbackUsed, rawSiteNumbers
 	}
 	// Skip the (15-30s) contacts render when the raw contacts page is already
 	// contacts-sufficient — the SAME shared predicate the homepage leg uses
@@ -260,7 +271,7 @@ func (e *Enricher) fetchContactsHTML(ctx context.Context, contactsURL string, it
 		if skipped {
 			e.metrics.browserRenderSkipped(renderSkipLegContacts, renderSkipReasonRawSufficient)
 		}
-		return rawHTML, rawPoisoned, skipped, rawSiteNumbers
+		return rawHTML, rawPoisoned, skipped, tlsFallbackUsed, rawSiteNumbers
 	}
 
 	// This render fires whenever the raw contacts fetch was thin/contactless —
@@ -272,7 +283,7 @@ func (e *Enricher) fetchContactsHTML(ctx context.Context, contactsURL string, it
 	if err := e.checkTarget(ctx, contactsURL); err != nil {
 		e.metrics.targetBlocked("contacts_page_render")
 		e.logger.DebugContext(ctx, "enriche: contacts page render target blocked", "url", contactsURL, "err", err)
-		return rawHTML, rawPoisoned, false, rawSiteNumbers
+		return rawHTML, rawPoisoned, false, tlsFallbackUsed, rawSiteNumbers
 	}
 
 	contactsRenderStart := time.Now()
@@ -288,7 +299,7 @@ func (e *Enricher) fetchContactsHTML(ctx context.Context, contactsURL string, it
 		e.metrics.browserRenderError()
 		e.logger.DebugContext(ctx, "enriche: contacts page render failed/shell",
 			"url", contactsURL, "rendered_bytes", len(rendered), "err", err)
-		return rawHTML, rawPoisoned, true, rawSiteNumbers
+		return rawHTML, rawPoisoned, true, tlsFallbackUsed, rawSiteNumbers
 	}
 	e.metrics.browserRender("contacts_page")
 	// Adopt the render only if it yields more contact facts than the raw page. A
@@ -296,7 +307,7 @@ func (e *Enricher) fetchContactsHTML(ctx context.Context, contactsURL string, it
 	// when nothing richer is adopted; siteNumbers reflect whichever HTML wins.
 	renderedFacts := extract.ExtractFactsForCity(rendered, contactsURL, item.City)
 	if contactFactCount(renderedFacts) > contactFactCount(rawFacts) {
-		return rendered, rawPoisoned, false, extract.CollectSiteNumbersHTML(rendered, rawPoisoned)
+		return rendered, rawPoisoned, false, tlsFallbackUsed, extract.CollectSiteNumbersHTML(rendered, rawPoisoned)
 	}
-	return rawHTML, rawPoisoned, false, rawSiteNumbers
+	return rawHTML, rawPoisoned, false, tlsFallbackUsed, rawSiteNumbers
 }

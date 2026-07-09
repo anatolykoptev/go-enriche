@@ -2,6 +2,8 @@ package fetch
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"io"
 	"net/http"
@@ -163,43 +165,95 @@ func (f *Fetcher) doFetch(ctx context.Context, rawURL string) (*FetchResult, err
 		return nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	resp, err := f.doRequest(ctx, &client, rawURL)
 	if err != nil {
-		return &FetchResult{Status: StatusUnreachable}, nil
-	}
-	if f.userAgent != "" {
-		req.Header.Set("User-Agent", f.userAgent)
-	}
-
-	resp, err := client.Do(req) //nolint:gosec // URL is user-provided by design; guarded against internal targets by NewFetcher's default transport (see go-kit httputil.NewSSRFGuardedClient)
-	if err != nil {
+		// A TLS CERTIFICATE error (hostname mismatch, untrusted CA, or
+		// another x509 chain error -- isCertError) is DISTINCT from an
+		// opaque connection failure (refused, DNS, timeout): the origin may
+		// still be genuinely reachable behind a broken cert (real case:
+		// p45.su serves a cert issued for a different host). Retry ONCE via
+		// httpFallbackURL's plain-HTTP downgrade, through the exact SAME
+		// `client` (same *http.Client, same already-guarded Transport, same
+		// CheckRedirect closure) -- never a fresh unguarded client, so the
+		// SSRF guard's connect-time Control hook re-runs for this hop
+		// exactly as it does for every other dial (see NewFetcher's and
+		// WithFollowRedirects' doc comments on why that hook, not the
+		// client instance, is what enforces the guard).
+		//
+		// Note: httpFallbackURL retries the ORIGINAL rawURL (this function's
+		// argument), not whichever hop's cert actually failed -- if the
+		// primary request already followed one or more redirects before the
+		// error surfaced, the fallback re-starts from rawURL's host, not the
+		// failing redirect target's. Safe (still fully guarded either way),
+		// but non-obvious.
+		if fallbackURL, ok := httpFallbackURL(rawURL); ok && isCertError(err) {
+			finalURL = "" // fresh redirect-chain tracking for the fallback's own hops
+			if fresp, ferr := f.doRequest(ctx, &client, fallbackURL); ferr == nil {
+				defer fresp.Body.Close() //nolint:errcheck
+				fr := f.processResponse(fresp, origHost, finalURL)
+				fr.TLSFallbackUsed = true
+				return fr, nil
+			}
+			// Fallback itself failed (blocked by the guard, refused,
+			// timed out, another cert error, ...) -- report the DISTINCT
+			// TLS-specific status instead of collapsing back to the
+			// generic StatusUnreachable every other failure gets, so a
+			// downstream consumer can tell "cert is broken" apart from
+			// "site is down" (see StatusTLSInvalid's doc comment).
+			return &FetchResult{Status: StatusTLSInvalid}, nil
+		}
 		return &FetchResult{Status: StatusUnreachable}, nil
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
+	return f.processResponse(resp, origHost, finalURL), nil
+}
+
+// doRequest issues a single GET through client, applying the same
+// User-Agent policy as every fetch (see WithUserAgent). Shared by doFetch's
+// primary request and its TLS-cert-error fallback retry so both attempts
+// build the request identically and share the exact same client/Transport
+// (and therefore the exact same SSRF guard).
+func (f *Fetcher) doRequest(ctx context.Context, client *http.Client, rawURL string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if f.userAgent != "" {
+		req.Header.Set("User-Agent", f.userAgent)
+	}
+	return client.Do(req) //nolint:gosec // URL is user-provided by design; guarded against internal targets by NewFetcher's default transport (see go-kit httputil.NewSSRFGuardedClient). The TLS-cert-error fallback (httpFallbackURL, doFetch) reuses this SAME client/transport, so the guard applies identically to both attempts.
+}
+
+// processResponse classifies an already-obtained *http.Response into a
+// FetchResult -- the shared tail of doFetch's primary request and its
+// TLS-cert-error fallback retry (see httpFallbackURL). finalURL is the last
+// hop's URL as captured by the client's CheckRedirect closure (empty if no
+// redirect occurred).
+func (f *Fetcher) processResponse(resp *http.Response, origHost, finalURL string) *FetchResult {
 	// Detect cross-domain redirect. Skipped when followRedirects is set --
 	// the request has already been followed through to resp by client.Do
-	// (CheckRedirect above returns nil until maxRedirects), so falling
-	// through below reads resp/body from the FINAL hop, not this one.
+	// (CheckRedirect returns nil until maxRedirects), so falling through
+	// below reads resp/body from the FINAL hop, not this one.
 	if finalURL != "" && extractHost(finalURL) != origHost && !f.followRedirects {
 		return &FetchResult{
 			Status:     StatusRedirect,
 			FinalURL:   finalURL,
 			StatusCode: resp.StatusCode,
-		}, nil
+		}
 	}
 
 	if resp.StatusCode == http.StatusNotFound {
 		return &FetchResult{
 			Status:     StatusNotFound,
 			StatusCode: resp.StatusCode,
-		}, nil
+		}
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
 		return &FetchResult{
 			Status:     StatusUnreachable,
 			StatusCode: resp.StatusCode,
-		}, nil
+		}
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, f.maxBodyBytes))
@@ -207,7 +261,7 @@ func (f *Fetcher) doFetch(ctx context.Context, rawURL string) (*FetchResult, err
 		return &FetchResult{
 			Status:     StatusUnreachable,
 			StatusCode: resp.StatusCode,
-		}, nil
+		}
 	}
 
 	return &FetchResult{
@@ -215,7 +269,59 @@ func (f *Fetcher) doFetch(ctx context.Context, rawURL string) (*FetchResult, err
 		Status:     StatusActive,
 		FinalURL:   finalURL,
 		StatusCode: resp.StatusCode,
-	}, nil
+	}
+}
+
+// isCertError reports whether err is a TLS CERTIFICATE validation failure --
+// hostname mismatch, untrusted/unknown CA, or another x509 chain-validation
+// error -- as DISTINCT from a connection-level failure (refused, DNS,
+// timeout) or a non-cert TLS transport error (e.g. a garbled handshake).
+// Only a cert error is eligible for doFetch's one-retry cert-tolerant
+// fallback (httpFallbackURL); every other error keeps returning
+// StatusUnreachable exactly as before this change.
+//
+// Checks four error types via errors.As, which walks the FULL wrapped chain
+// (net/http wraps in *url.Error, which wraps *net.OpError, which wraps the
+// TLS error), so nesting depth doesn't matter:
+//   - x509.HostnameError -- cert valid, but for a different host (the p45.su
+//     ground-truth case: a cert issued for 000h01.westcall.spb.ru).
+//   - x509.UnknownAuthorityError -- self-signed / untrusted CA.
+//   - x509.CertificateInvalidError -- expired, not-yet-valid, or another
+//     chain-validation failure (covers x509.Expired and friends).
+//   - *tls.CertificateVerificationError -- the Go 1.20+ wrapper crypto/tls
+//     puts around ANY certificate-verification failure (its Unwrap returns
+//     the underlying x509 error, so the three checks above already catch
+//     most cases through it; this direct check is defense-in-depth for an
+//     x509 error type not explicitly named above).
+func isCertError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var hostErr x509.HostnameError
+	var authErr x509.UnknownAuthorityError
+	var certErr x509.CertificateInvalidError
+	var verifyErr *tls.CertificateVerificationError
+	return errors.As(err, &hostErr) ||
+		errors.As(err, &authErr) ||
+		errors.As(err, &certErr) ||
+		errors.As(err, &verifyErr)
+}
+
+// httpFallbackURL returns rawURL with its scheme swapped from "https" to
+// "http" -- host, port, path, and query are untouched -- for doFetch's
+// one-retry TLS-cert-error fallback (see isCertError). Deliberately a pure
+// URL rewrite reusing the SAME host:port the primary request already
+// resolved to: it does NOT invent a new target, so it changes nothing about
+// which address the SSRF guard has to evaluate. Returns ok=false for a
+// non-https URL (nothing to fall back from) or an unparseable one.
+func httpFallbackURL(rawURL string) (string, bool) {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "https" {
+		return "", false
+	}
+	fallback := *u
+	fallback.Scheme = "http"
+	return fallback.String(), true
 }
 
 // extractHost returns the lowercase host from a URL string.
