@@ -338,6 +338,17 @@ type phoneCandidate struct {
 	// PREFIX is not dynamic-insertion evidence; the DOM region is.
 	naturalTier int
 	areaCode    int // 3-digit RU area code, or -1
+	// roleLabel is the nearest human role/label text found near this
+	// candidate's DOM node (phoneRoleLabelText, phonerole.go) — e.g. a
+	// leasing-desk heading. "" when the finder has no DOM node to scan
+	// (branchJSONCandidates/schemaPlaceCandidates/ogPhoneCandidates read
+	// structured JSON/meta, not a labeled DOM region) or when none was
+	// found nearby. Set at find-time by telCandidates/microdataCandidates
+	// (this file) and contactsTextCandidates (contactstext.go) — the three
+	// finders that have a live DOM node to scan. CollectSiteNumbers
+	// (sitenumbers.go) copies it into PhoneNumberFact.RoleLabelRaw and
+	// classifies it into PhoneNumberFact.Role.
+	roleLabel string
 }
 
 // collectPhoneCandidates returns every valid site-own phone candidate, each
@@ -393,6 +404,7 @@ func telCandidates(doc *goquery.Document) []phoneCandidate {
 		}
 		c, ok := makeCandidate(display, telTier(s))
 		if ok {
+			c.roleLabel = phoneRoleLabelText(s)
 			out = append(out, c)
 		}
 	})
@@ -497,6 +509,7 @@ func microdataCandidates(doc *goquery.Document) []phoneCandidate {
 			v = strings.TrimSpace(s.Text())
 		}
 		if c, ok := makeCandidate(v, tierMicrodata); ok {
+			c.roleLabel = phoneRoleLabelText(s)
 			out = append(out, c)
 		}
 	})

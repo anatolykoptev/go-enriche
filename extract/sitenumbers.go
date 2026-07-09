@@ -75,6 +75,28 @@ type PhoneNumberFact struct {
 	// number is never mistaken for a neutral/safe candidate. CityMatch and
 	// CityForeign are never both true.
 	CityForeign bool
+	// RoleLabelRaw is the nearest human role/label text found near this
+	// candidate's DOM node (phoneRoleLabelText, phonerole.go) — e.g. a
+	// leasing-desk heading («по вопросам аренды торговых мест») or an
+	// inline department prefix («Отдел кадров. Телефон:»). Noise-stripped,
+	// whitespace-normalized, and length-capped to ~120 chars, kept close to
+	// verbatim (not further paraphrased) for a downstream LLM consumer. ""
+	// when no role/label text was found nearby, or when the finder has no
+	// DOM node to scan at all (branchJSONCandidates/schemaPlaceCandidates/
+	// ogPhoneCandidates read structured JSON/meta, not a labeled DOM
+	// region) — in both cases Role is roleGeneral (see its doc comment:
+	// unlabeled never demotes).
+	RoleLabelRaw string
+	// Role classifies RoleLabelRaw via classifyPhoneRole (phonerole.go) into
+	// a binary general/departmental verdict, so a downstream consumer (e.g.
+	// go-wp's card-phone picker, task A2) can skip a departmental number
+	// (аренда/факс/бухгалтерия/…) rather than auto-applying it as a card's
+	// public line — the p45.su motivating case: a general line listed first
+	// plus a mobile tel: under a PRECEDING «…по вопросам аренды торговых
+	// мест» heading. Zero value roleGeneral: an unlabeled candidate
+	// (RoleLabelRaw=="") is ALWAYS general, never demoted for lacking
+	// context.
+	Role PhoneRole
 }
 
 // Site-number source labels (PhoneNumberFact.Source). The tierContacts label
@@ -222,11 +244,13 @@ func CollectSiteNumbers(doc *goquery.Document, pagePoisoned bool) []PhoneNumberF
 		anchored := numberIsAnchored(c.naturalTier)
 		tagged = append(tagged, keyed{
 			fact: PhoneNumberFact{
-				Value:       c.value,
-				Source:      numberSourceForTier(c.naturalTier),
-				Anchored:    anchored,
-				DNI:         dni,
-				Trustworthy: dniTrustworthy(c.naturalTier, dni),
+				Value:        c.value,
+				Source:       numberSourceForTier(c.naturalTier),
+				Anchored:     anchored,
+				DNI:          dni,
+				Trustworthy:  dniTrustworthy(c.naturalTier, dni),
+				RoleLabelRaw: c.roleLabel,
+				Role:         classifyPhoneRole(c.roleLabel),
 			},
 			tier: c.naturalTier,
 			key:  key,

@@ -1,6 +1,7 @@
 package extract
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/PuerkitoBio/goquery"
@@ -215,5 +216,51 @@ func TestCollectSiteNumbers_PlainTextContacts_DNIStaysUntrustworthy(t *testing.T
 	}
 	if landline.Trustworthy {
 		t.Errorf("812 landline Trustworthy = true, want false (DNI active — a rotating text slot is not trustworthy)")
+	}
+}
+
+// generalAndLeasingPlainTextHTML is the D2/D3 plain-text integration
+// fixture: a general «Телефоны:» number with no role context, plus a
+// leasing-desk number under a PRECEDING «Аренда мест» heading that itself
+// carries no phone token (so it is never itself picked up as a
+// rePhoneLabel-anchored label node — only the sibling «Тел.:» block is).
+const generalAndLeasingPlainTextHTML = `<!doctype html><html><body>
+<div class="contacts">
+  <p>Телефоны: +7 (812) 111-22-33</p>
+  <div class="dept">
+    <div class="h6">Аренда мест</div>
+    <p>Тел.: +7 (812) 444-55-66</p>
+  </div>
+</div>
+</body></html>`
+
+// TestCollectSiteNumbers_PlainTextContacts_GeneralAndLeasingRoles is the D2/D3
+// plain-text integration golden: contactsTextCandidates must scan the
+// NUMBER's neighbourhood (the live phoneValueScope node), not just the
+// in-hand «Тел.:» label node, to pick up the preceding «Аренда мест»
+// heading — the general number (no role context) must stay roleGeneral
+// while the leasing number classifies roleDepartmental.
+func TestCollectSiteNumbers_PlainTextContacts_GeneralAndLeasingRoles(t *testing.T) {
+	t.Parallel()
+	doc := docFromHTML(t, generalAndLeasingPlainTextHTML)
+	nums := CollectSiteNumbers(doc, false)
+
+	general := findByValueSubstring(nums, "111-22-33")
+	if general == nil {
+		t.Fatalf("general plain-text candidate missing; got %+v", nums)
+	}
+	if general.Role != roleGeneral {
+		t.Errorf("general candidate Role = %q, want roleGeneral (RoleLabelRaw=%q)", general.Role, general.RoleLabelRaw)
+	}
+
+	leasing := findByValueSubstring(nums, "444-55-66")
+	if leasing == nil {
+		t.Fatalf("leasing plain-text candidate missing; got %+v", nums)
+	}
+	if leasing.Role != roleDepartmental {
+		t.Errorf("leasing candidate Role = %q, want roleDepartmental", leasing.Role)
+	}
+	if !strings.Contains(strings.ToLower(leasing.RoleLabelRaw), "аренд") {
+		t.Errorf("leasing candidate RoleLabelRaw = %q, want it to contain %q", leasing.RoleLabelRaw, "аренд")
 	}
 }
