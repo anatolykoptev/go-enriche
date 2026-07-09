@@ -73,6 +73,9 @@ func (e *Enricher) fetchAndExtract(ctx context.Context, item Item, result *Resul
 	}
 
 	result.Status = fr.Status
+	if fr.TLSFallbackUsed {
+		result.TLSFallbackUsed = true
+	}
 	if fr.FinalURL != "" {
 		result.URL = fr.FinalURL
 	}
