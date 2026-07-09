@@ -179,6 +179,13 @@ func (f *Fetcher) doFetch(ctx context.Context, rawURL string) (*FetchResult, err
 		// exactly as it does for every other dial (see NewFetcher's and
 		// WithFollowRedirects' doc comments on why that hook, not the
 		// client instance, is what enforces the guard).
+		//
+		// Note: httpFallbackURL retries the ORIGINAL rawURL (this function's
+		// argument), not whichever hop's cert actually failed -- if the
+		// primary request already followed one or more redirects before the
+		// error surfaced, the fallback re-starts from rawURL's host, not the
+		// failing redirect target's. Safe (still fully guarded either way),
+		// but non-obvious.
 		if fallbackURL, ok := httpFallbackURL(rawURL); ok && isCertError(err) {
 			finalURL = "" // fresh redirect-chain tracking for the fallback's own hops
 			if fresp, ferr := f.doRequest(ctx, &client, fallbackURL); ferr == nil {

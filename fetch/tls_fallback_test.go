@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"syscall"
 	"testing"
@@ -333,33 +334,103 @@ func startDropPlainServer(t *testing.T, addr string, tlsCfg *tls.Config) (baseUR
 // request reaches a REAL, non-blocked local address (firstUnblockedLocalIP,
 // ssrf_test.go) and fails with a genuine cert error (self-signed, untrusted
 // CA -- httptest's own default). doFetch's plain-HTTP fallback retry then
-// hits the SAME listener (dualListener) and gets a 302 redirect to
-// "http://127.0.0.1:1/blocked" -- an explicitly SSRF-blocked target. Uses
-// the REAL guarded default (NewFetcher(), no WithClient escape hatch): if a
-// future change threaded the fallback through an unguarded client instead
-// of doFetch's already-guarded one, this test would start seeing the
-// "should never be reached" body and go red.
+// hits the SAME listener (dualListener) and gets a 302 redirect to a REAL,
+// LISTENING loopback server carrying a sentinel body.
+//
+// Deliberately NOT "http://127.0.0.1:1/blocked" (an earlier version of this
+// test used an unused port there): with nothing listening on port 1, the
+// dial fails with connection-refused WHETHER OR NOT the guard is present --
+// that version would have passed even routed through an unguarded
+// http.DefaultClient, silently proving nothing (caught in PR #47 review).
+// 127.0.0.1 is refused by the guard's LOOPBACK rule independent of port, so
+// a REAL listening server there only stays unreached because of the guard,
+// not because the connection was doomed anyway -- see this function's
+// sibling below for the RED-on-revert proof that this version actually
+// discriminates (an unguarded client DOES reach the sentinel).
+//
+// Uses the REAL guarded default (NewFetcher(), no WithClient escape hatch)
+// plus WithFollowRedirects(): if a future change threaded the fallback
+// through an unguarded client instead of doFetch's already-guarded one,
+// this test would start seeing the sentinel in result.HTML and go red --
+// WithFollowRedirects is required for that leak to actually surface in HTML
+// instead of being silently dropped by the UNRELATED cross-domain-redirect
+// -> StatusRedirect-with-empty-body branch (processResponse), which would
+// otherwise mask a real guard bypass as a false negative here.
 func TestFetch_TLSCertError_FallbackRedirectToBlockedTarget_StaysBlocked(t *testing.T) {
 	t.Parallel()
-	hostIP := firstUnblockedLocalIP(t)
-
-	cert, _ := generateSelfSignedCert(t, hostIP)                 // untrusted CA either way; hostname needn't match
-	tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}} //nolint:gosec // test server cert
-	redirectToBlocked := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "http://127.0.0.1:1/blocked", http.StatusFound)
-	})
-	baseURL, closeFn := startDualProtoServer(t, net.JoinHostPort(hostIP, "0"), tlsCfg, redirectToBlocked)
+	baseURL, closeFn := newCertErrorRedirectToLoopbackServer(t)
 	defer closeFn()
 
-	f := NewFetcher() // REAL guarded default, no escape hatch
+	f := NewFetcher(WithFollowRedirects()) // REAL guarded default, no escape hatch
 	result, err := f.Fetch(context.Background(), baseURL+"/contacts")
 	if err != nil {
 		t.Fatalf("unexpected Fetch error: %v", err)
 	}
-	if result.Status == StatusActive {
-		t.Fatalf("Status = %s, want NOT active -- the fallback's redirect target (127.0.0.1:1) must stay blocked", result.Status)
+	if strings.Contains(result.HTML, blockedTargetSentinel) {
+		t.Fatalf("SSRF guard failed to block the fallback's redirect to a loopback target -- sentinel leaked through: %q", result.HTML)
 	}
-	if strings.Contains(result.HTML, "blocked") {
-		t.Errorf("HTML unexpectedly reached the redirect target's content: %q", result.HTML)
+	if result.Status == StatusActive {
+		t.Errorf("Status = %s, want NOT active -- the fallback's redirect target (a real loopback server) must stay blocked", result.Status)
+	}
+}
+
+// TestFetch_TLSCertError_FallbackRedirectToBlockedTarget_DiscriminationProof
+// is the RED-on-revert evidence for the security test above, kept as a
+// permanent regression guard rather than a one-off manual check: it drives
+// the IDENTICAL scenario through an UNGUARDED client (WithClient, the same
+// escape hatch every other non-SSRF test in this package uses) and asserts
+// the OPPOSITE outcome -- the sentinel DOES leak and Status IS active. This
+// proves the topology in the test above can actually distinguish "guard
+// present" from "guard absent"; if the redirect target were still an unused
+// port (or anything else that fails regardless of the guard), THIS test
+// would fail too, catching the same non-discriminating-test bug the sentinel
+// server was introduced to fix.
+func TestFetch_TLSCertError_FallbackRedirectToBlockedTarget_DiscriminationProof(t *testing.T) {
+	t.Parallel()
+	baseURL, closeFn := newCertErrorRedirectToLoopbackServer(t)
+	defer closeFn()
+
+	unguarded := &http.Client{Timeout: DefaultTimeout}
+	f := NewFetcher(WithFollowRedirects(), WithClient(unguarded)) // deliberately UNGUARDED -- proves the test above discriminates
+	result, err := f.Fetch(context.Background(), baseURL+"/contacts")
+	if err != nil {
+		t.Fatalf("unexpected Fetch error: %v", err)
+	}
+	if !strings.Contains(result.HTML, blockedTargetSentinel) {
+		t.Fatalf("expected the UNGUARDED client to reach the loopback sentinel (proving the scenario discriminates), got HTML=%q status=%s", result.HTML, result.Status)
+	}
+	if result.Status != StatusActive {
+		t.Errorf("expected the unguarded fetch to report %s, got %s", StatusActive, result.Status)
+	}
+}
+
+const blockedTargetSentinel = "SENTINEL: fallback redirect target reached -- SSRF guard did not block it"
+
+// newCertErrorRedirectToLoopbackServer builds the shared topology for both
+// tests above: a cert-error primary endpoint (bound to a real, non-blocked
+// local interface address -- firstUnblockedLocalIP) whose plain-HTTP
+// fallback response 302-redirects to a REAL, listening httptest.Server on
+// 127.0.0.1 carrying blockedTargetSentinel. 127.0.0.1 is always refused by
+// the guard's loopback rule, independent of port -- see the doc comment on
+// the first test above for why this (not an unused port) is what makes the
+// scenario discriminating.
+func newCertErrorRedirectToLoopbackServer(t *testing.T) (baseURL string, closeFn func()) {
+	t.Helper()
+	hostIP := firstUnblockedLocalIP(t)
+
+	blockedSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(blockedTargetSentinel))
+	}))
+
+	cert, _ := generateSelfSignedCert(t, hostIP)                 // untrusted CA either way; hostname needn't match
+	tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}} //nolint:gosec // test server cert
+	redirectToBlocked := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, blockedSrv.URL+"/blocked", http.StatusFound)
+	})
+	base, closeDual := startDualProtoServer(t, net.JoinHostPort(hostIP, "0"), tlsCfg, redirectToBlocked)
+	return base, func() {
+		closeDual()
+		blockedSrv.Close()
 	}
 }

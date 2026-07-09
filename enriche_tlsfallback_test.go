@@ -194,3 +194,93 @@ func TestFetchContactsHTML_TLSCertError_ReturnsTLSFallbackUsed(t *testing.T) {
 		t.Error("tlsFallbackUsed = false, want true — the contacts-page raw fetch recovered via the cert-error fallback")
 	}
 }
+
+// TestEnrich_ContactsPageTLSCertError_TagsResultLowTrust is the MONEY-PATH
+// counterpart the two tests above don't cover: resolveContactsPage's own
+// OR-wiring (`if contactsTLSFallbackUsed { result.TLSFallbackUsed = true }`,
+// enriche_contacts.go) has no test driving it through a full Enrich() call —
+// TestFetchContactsHTML_TLSCertError_ReturnsTLSFallbackUsed above proves
+// fetchContactsHTML's OWN return value is correct, but not that the CALLER
+// actually reads it. Deleting that one OR line leaves every existing test
+// green while a fallback-sourced contacts number ships un-tagged (PR #47
+// review finding #2).
+//
+// The homepage here is fetched over PLAIN http — no TLS at all, so it
+// "validates cleanly" trivially (there is nothing to validate) — and is
+// deliberately thin (no phone/email/hours/address) so homepageMissingRichField
+// triggers contacts-page discovery. The homepage links an ABSOLUTE
+// "https://<host>:<port>/contacts" URL: extract.DiscoverContactsPage only
+// follows a SAME-ORIGIN link (resolveSameOrigin compares url.URL.Host, which
+// is scheme-independent — "host:port" only), so the discovered contacts page
+// MUST live on the exact same listener as the homepage; an absolute https
+// link is what makes ONLY the contacts leg hit the TLS cert-error path while
+// the homepage leg never touches TLS at all. Both paths are served by the
+// SAME dualListenerTLS-backed server (see startHomeContactsTLSServer).
+func TestEnrich_ContactsPageTLSCertError_TagsResultLowTrust(t *testing.T) {
+	t.Parallel()
+	addr, pool, closeFn := startHomeContactsTLSServer(t)
+	defer closeFn()
+
+	e := newTestEnricher(WithFetcher(tlsFallbackFetcher(pool)))
+	result, err := e.Enrich(context.Background(), Item{
+		Name: "Клиника", URL: "http://" + addr + "/", City: "Санкт-Петербург",
+		Mode: ModePlaces, SkipMapsCheck: true,
+	})
+	if err != nil {
+		t.Fatalf("Enrich error: %v", err)
+	}
+	if result.Facts.Phone == nil {
+		t.Fatalf("Facts.Phone = nil, want the contacts-page phone recovered via the fallback (sanity: discovery+fetch actually ran)")
+	}
+	if !result.TLSFallbackUsed {
+		t.Error("Result.TLSFallbackUsed = false, want true — the discovered /contacts subpage recovered via the cert-error fallback")
+	}
+}
+
+// startHomeContactsTLSServer serves a thin, contact-less homepage over PLAIN
+// HTTP at "/" and a contact-rich page over HTTPS (self-signed, wrong-host
+// cert) at "/contacts" — both on the SAME listener/port (dualListenerTLS),
+// which is required for extract.DiscoverContactsPage's same-origin check to
+// follow the homepage's absolute "https://<addr>/contacts" link. Returns the
+// bare "host:port" (a caller builds the http:// item.URL itself) and the
+// CertPool a client must trust to isolate the /contacts failure to a pure
+// hostname mismatch.
+func startHomeContactsTLSServer(t *testing.T) (addr string, pool *x509.CertPool, closeFn func()) {
+	t.Helper()
+	cert, pool := generateSelfSignedLeaf(t, "wrong-host.example")
+	tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}} //nolint:gosec // test server cert
+	var lc net.ListenConfig
+	ln, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr = ln.Addr().String()
+
+	homeHTML := `<!DOCTYPE html><html lang="ru"><head><title>Клиника</title></head>
+<body><article><h1>О клинике</h1>
+<p>Мы оказываем медицинские услуги жителям города уже пятнадцать лет, наши
+специалисты используют современное оборудование и подход, ориентированный на
+пациента, чтобы забота о здоровье была доступна каждый день недели без
+выходных и праздников круглый год для всех пациентов нашей клиники.</p>
+<nav><a href="https://` + addr + `/contacts">Контакты</a></nav>
+</article></body></html>`
+	const contactsHTML = `<html><body>
+<a href="tel:+78121112233">+7 (812) 111-22-33</a>
+<div><span>Часы работы</span><span>Пн-Пт 10:00-20:00</span></div>
+<address>Невский проспект, 1</address>
+</body></html>`
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(homeHTML))
+	})
+	mux.HandleFunc("/contacts", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(contactsHTML))
+	})
+	d := &dualListenerTLS{Listener: ln, tlsConfig: tlsCfg}
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	go srv.Serve(d)                           //nolint:errcheck
+	return addr, pool, func() { srv.Close() } //nolint:errcheck
+}
