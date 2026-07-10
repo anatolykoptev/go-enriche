@@ -135,7 +135,7 @@ func contactsTextCandidates(doc *goquery.Document, existing []phoneCandidate) []
 		// shares one department context. See phoneRoleLabelText's doc
 		// comment (phonerole.go) for why this is a PRECEDING-context scan,
 		// not a mirror of phoneValueScope's own FOLLOWING-looking walk.
-		roleLabel := phoneRoleLabelText(scope)
+		roleLabel := phoneRoleLabelText(narrowestLivePhoneNode(scope))
 		// Gate 1 (value side) + gate 3: strip noise once, then bound the harvest
 		// to the narrowest phone-bearing node so a broad ancestor scope does not
 		// pull an unrelated far number into the set.
@@ -201,6 +201,60 @@ func narrowestPhoneNode(node *goquery.Selection) *goquery.Selection {
 		var next *goquery.Selection
 		node.Children().EachWithBreak(func(_ int, ch *goquery.Selection) bool {
 			if rePhone.MatchString(ch.Text()) {
+				next = ch
+				return false
+			}
+			return true
+		})
+		if next == nil {
+			return node
+		}
+		node = next
+	}
+}
+
+// narrowestLivePhoneNode is the LIVE-DOM twin of narrowestPhoneNode above:
+// it descends the SAME child-narrowing algorithm, but over live,
+// still-attached nodes rather than a detached, noise-stripped clone — the
+// distinction that matters because phoneRoleLabelText's role-label scan
+// (phonerole.go) walks a node's Parent()/PrevAll(), which a detached clone
+// cannot do (Parent() is empty off a clone's root; PrevAll() only sees the
+// clone's own synthetic subtree, never the live document's real siblings).
+//
+// WHY narrowest: phoneValueScope (above) intentionally climbs up to
+// maxPhoneLabelAncestor levels when neither a label's own block nor its
+// immediate next sibling carries a phone match, landing on a COARSE
+// multi-paragraph ancestor whose text merely CONTAINS a phone match
+// somewhere within it (the p45.su live bug this exists to fix: a local,
+// unprefixed «телефону 242-55-38» label forces the climb, landing on the
+// whole .content container that also happens to hold an unrelated
+// «+7-921-941-10-83» leasing number two paragraphs down). That coarse scope
+// is a perfectly fine VALUE-extraction boundary — narrowestPhoneNode still
+// narrows it down before harvesting digits — but reading a ROLE label
+// directly from the coarse scope walks the WRONG PrevAll/Parent chain: from
+// a broad container, the closest preceding sibling is often an unrelated
+// global element (p45.su: a #mobile_header nav wrapper one level up from
+// the coarse scope, whose menu text then leaks into RoleLabelRaw and
+// classifies a genuinely departmental number general). Descending first to
+// the SAME narrow node phoneRoleLabelText should have started from — the
+// phone's own immediate block — fixes both the coarse-scope mispairing and
+// the menu-leak in one call, before phoneRoleLabelText ever starts
+// climbing.
+//
+// Preserves the multi-number shared-value-block invariant: when a phone
+// value block splits a number across sibling text nodes (or holds more
+// than one number, e.g. a «+7 (812) …<br/>+7 (967) …» block), no SINGLE
+// child's own text carries a full match — EachWithBreak finds no
+// qualifying child, the descent stops, and the shared block itself is
+// returned unchanged. That keeps the one phoneRoleLabelText lookup
+// contactsTextCandidates makes per scope covering every number the block
+// holds, exactly like narrowestPhoneNode's own harvest scope.
+func narrowestLivePhoneNode(scope *goquery.Selection) *goquery.Selection {
+	node := scope
+	for {
+		var next *goquery.Selection
+		node.Children().EachWithBreak(func(_ int, ch *goquery.Selection) bool {
+			if rePhone.MatchString(strings.TrimSpace(stripNoiseClone(ch).Text())) {
 				next = ch
 				return false
 			}

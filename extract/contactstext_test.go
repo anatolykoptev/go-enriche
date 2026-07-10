@@ -264,3 +264,130 @@ func TestCollectSiteNumbers_PlainTextContacts_GeneralAndLeasingRoles(t *testing.
 		t.Errorf("leasing candidate RoleLabelRaw = %q, want it to contain %q", leasing.RoleLabelRaw, "аренд")
 	}
 }
+
+// p45SuLeasingContactsHTML reproduces the exact plain-text contacts DOM of
+// p45.su's /контакты page (live capture, task fix/phone-role-from-narrowest-
+// node): a general LOCAL 7-digit line («…телефону 242-55-38…», no +7/8
+// prefix, so rePhone never matches it) sits in the same coarse .content
+// block as the only FULL number, the leasing desk's «+7-921-941-10-83», two
+// <p>s below a «По вопросам аренды свободных торговых мест…» heading that
+// itself carries no phone token of its own (so it is never itself picked up
+// as a rePhoneLabel-anchored label — only the local-number <p> and the
+// heading <p> are, since «телефонам» also contains the «телефон» stem).
+//
+// phoneValueScope must climb past both the label's own block (local number,
+// no rePhone match) and its immediate next sibling (the heading, also no
+// match) to the coarse .content ancestor — whose own PRECEDING sibling in
+// the live document is #mobile_header, a <div> wrapping a
+// <select class="menu"> whose menu OPTIONs are not themselves flagged nav
+// boilerplate (isNavigationBoilerplate inspects only the CANDIDATE node's
+// own tag/class/id, and #mobile_header itself carries neither "menu" nor
+// "nav" in its id — only its descendant <select> does). Reading a role
+// label from the coarse .content scope itself therefore leaks that menu
+// text in as a wrongly-general role context — the exact live bug
+// narrowestLivePhoneNode (contactstext.go) fixes by first descending to the
+// narrowest live phone-bearing node (the leasing <p> itself) before
+// phoneRoleLabelText ever walks outward from it.
+const p45SuLeasingContactsHTML = `<!doctype html><html><body>
+<div id="mobile_header">
+  <select class="menu"><option>— Main Menu —</option><option>Главная</option><option>Покупателям</option><option>Контакты</option></select>
+</div>
+<div id="content"><div class="content">
+  <p>Вы можете позвонить по контактному телефону 242-55-38 в любое время.</p>
+  <p>По вопросам аренды свободных торговых мест обращайтесь по телефонам:</p>
+  <p>+7-921-941-10-83 Леонид Анатольевич</p>
+</div></div>
+</body></html>`
+
+// TestCollectSiteNumbers_PlainTextContacts_CoarseScopeLeasingNotMenu is the
+// p45.su regression (primary): the leasing number +7-921-941-10-83 must
+// classify roleDepartmental with a RoleLabelRaw carrying «аренд», NOT
+// roleGeneral off the #mobile_header menu text a coarse-scope role-label
+// read would otherwise leak in. Before the fix (roleLabel read from the
+// coarse `scope` itself, not narrowestLivePhoneNode(scope)) this MUST FAIL:
+// phoneRoleLabelText climbs from the coarse .content scope, finds
+// #mobile_header as the closest preceding sibling at the #content level,
+// and — since #mobile_header itself is not recognized as nav boilerplate —
+// reads its menu text as the role label, classifying general instead of
+// departmental and never containing «аренд».
+func TestCollectSiteNumbers_PlainTextContacts_CoarseScopeLeasingNotMenu(t *testing.T) {
+	t.Parallel()
+	doc := docFromHTML(t, p45SuLeasingContactsHTML)
+	nums := CollectSiteNumbers(doc, false)
+
+	leasing := findByValueSubstring(nums, "941-10-83")
+	if leasing == nil {
+		t.Fatalf("leasing number +7-921-941-10-83 missing from SiteNumbers; got %+v", nums)
+	}
+	if !leasing.Role.IsDepartmental() {
+		t.Errorf("leasing candidate Role = %q (IsDepartmental=false), want departmental; RoleLabelRaw=%q — coarse-scope climb must not read the #mobile_header menu as the role context", leasing.Role, leasing.RoleLabelRaw)
+	}
+	if !strings.Contains(strings.ToLower(leasing.RoleLabelRaw), "аренд") {
+		t.Errorf("leasing candidate RoleLabelRaw = %q, want it to contain %q (the «аренды» heading), not the #mobile_header menu text", leasing.RoleLabelRaw, "аренд")
+	}
+	if strings.Contains(leasing.RoleLabelRaw, "Главная") || strings.Contains(leasing.RoleLabelRaw, "Main Menu") {
+		t.Errorf("leasing candidate RoleLabelRaw = %q leaked the #mobile_header menu text", leasing.RoleLabelRaw)
+	}
+}
+
+// TestCollectSiteNumbers_PlainTextContacts_DirectBlockRoleUnchanged is the
+// no-regression control: when the phone value sits in the label's OWN
+// block (phoneValueScope resolves at depth 0, no climb needed),
+// narrowestLivePhoneNode(scope) has no phone-bearing child element to
+// descend into and returns scope itself unchanged — so the role-label read
+// and the extracted number are identical to pre-fix behaviour. Must stay
+// roleGeneral (no departmental context anywhere in this fixture) and the
+// number must still be extracted.
+func TestCollectSiteNumbers_PlainTextContacts_DirectBlockRoleUnchanged(t *testing.T) {
+	t.Parallel()
+	const html = `<!doctype html><html><body>
+<div class="contacts"><p>Телефон: +7 (812) 234-56-78</p></div>
+</body></html>`
+	doc := docFromHTML(t, html)
+	nums := CollectSiteNumbers(doc, false)
+
+	got := findByValueSubstring(nums, "234-56-78")
+	if got == nil {
+		t.Fatalf("direct-block phone missing from SiteNumbers; got %+v", nums)
+	}
+	if got.Role != roleGeneral {
+		t.Errorf("direct-block candidate Role = %q, want roleGeneral (RoleLabelRaw=%q)", got.Role, got.RoleLabelRaw)
+	}
+}
+
+// TestCollectSiteNumbers_PlainTextContacts_SharedValueBlockRoleShared is the
+// multi-number shared-block invariant: when a phone-value block holds TWO
+// numbers split across text nodes around a <br/> (neither number's own
+// child element carries the full match, since they are bare text siblings
+// of the <br/>), narrowestLivePhoneNode must find no single qualifying
+// child and stop AT the shared block — not silently resolve to only one of
+// the two numbers. Both numbers must still be harvested, and both must
+// share the SAME RoleLabelRaw (proving one role-label lookup, computed
+// once per scope, covers the whole shared block — not a fresh lookup per
+// number).
+func TestCollectSiteNumbers_PlainTextContacts_SharedValueBlockRoleShared(t *testing.T) {
+	t.Parallel()
+	const html = `<!doctype html><html><body>
+<div class="contacts">
+  <p>Работаем ежедневно с 10 до 22</p>
+  <p>Телефоны: +7 (812) 111-11-11<br/>+7 (812) 222-22-22</p>
+</div>
+</body></html>`
+	doc := docFromHTML(t, html)
+	nums := CollectSiteNumbers(doc, false)
+
+	first := findByValueSubstring(nums, "111-11-11")
+	if first == nil {
+		t.Fatalf("first shared-block number missing; got %+v", nums)
+	}
+	second := findByValueSubstring(nums, "222-22-22")
+	if second == nil {
+		t.Fatalf("second shared-block number missing; got %+v", nums)
+	}
+	if first.RoleLabelRaw != second.RoleLabelRaw {
+		t.Errorf("shared value-block numbers got DIFFERENT RoleLabelRaw: %q vs %q, want identical (one role-label lookup per scope)", first.RoleLabelRaw, second.RoleLabelRaw)
+	}
+	if first.RoleLabelRaw == "" || !strings.Contains(first.RoleLabelRaw, "ежедневно") {
+		t.Errorf("shared value-block RoleLabelRaw = %q, want it to contain %q", first.RoleLabelRaw, "ежедневно")
+	}
+}
