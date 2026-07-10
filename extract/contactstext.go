@@ -254,6 +254,19 @@ func narrowestLivePhoneNode(scope *goquery.Selection) *goquery.Selection {
 	for {
 		var next *goquery.Selection
 		node.Children().EachWithBreak(func(_ int, ch *goquery.Selection) bool {
+			// A child that is ITSELF a noise element (a JSON-LD
+			// <script>"telephone":…</script>, a <style> with CSS decimals,
+			// <noscript>, …) must never become the descent target: its raw
+			// text can hold a rePhone-matching digit run, but it is not
+			// page-visible copy and the role scan below would read a label
+			// decoupled from the harvested number. stripNoiseClone below is
+			// blind to this case — goquery's .Find(removeNoiseSelectors)
+			// matches DESCENDANTS only, never the clone's own root tag — so
+			// self-exclude here, mirroring contactsTextCandidates' own
+			// .Not(removeNoiseSelectors) label-node gate above.
+			if ch.Is(removeNoiseSelectors) {
+				return true
+			}
 			if rePhone.MatchString(strings.TrimSpace(stripNoiseClone(ch).Text())) {
 				next = ch
 				return false

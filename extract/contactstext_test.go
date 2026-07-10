@@ -391,3 +391,87 @@ func TestCollectSiteNumbers_PlainTextContacts_SharedValueBlockRoleShared(t *test
 		t.Errorf("shared value-block RoleLabelRaw = %q, want it to contain %q", first.RoleLabelRaw, "ежедневно")
 	}
 }
+
+// p45SuLeasingWithJSONLDNoiseHTML is the p45.su coarse-scope shape PLUS a
+// JSON-LD <script> as the FIRST child of the coarse .content scope — a
+// near-universal RU-SMB contact-page shape. Its raw text carries a rePhone-
+// matching "telephone" field. narrowestLivePhoneNode strips per-child via
+// stripNoiseClone, whose goquery .Find() matches DESCENDANTS only and so does
+// NOT strip a child that IS itself a <script>; without the self-noise guard
+// the descent lands on the script node and phoneRoleLabelText reads a role
+// label decoupled from the harvested leasing number (regression: departmental
+// → empty ⇒ general, re-arming the money-path auto-confirm this whole change
+// prevents).
+const p45SuLeasingWithJSONLDNoiseHTML = `<!doctype html><html><body>
+<div id="mobile_header">
+  <select class="menu"><option>— Main Menu —</option><option>Главная</option><option>Контакты</option></select>
+</div>
+<div id="content"><div class="content">
+  <script type="application/ld+json">{"@type":"Organization","telephone":"+7 (812) 555-00-11"}</script>
+  <p>Вы можете позвонить по контактному телефону 242-55-38 в любое время.</p>
+  <p>По вопросам аренды свободных торговых мест обращайтесь по телефонам:</p>
+  <p>+7-921-941-10-83 Леонид Анатольевич</p>
+</div></div>
+</body></html>`
+
+// p45SuLeasingWithStyleNoiseHTML is the same shape with a <style> (whose CSS
+// content string holds a rePhone-matching run) as the first .content child —
+// the second self-noise-child vector the review flagged.
+const p45SuLeasingWithStyleNoiseHTML = `<!doctype html><html><body>
+<div id="mobile_header">
+  <select class="menu"><option>— Main Menu —</option><option>Главная</option><option>Контакты</option></select>
+</div>
+<div id="content"><div class="content">
+  <style>.badge::before{content:"+7 812 000 00 00"}</style>
+  <p>Вы можете позвонить по контактному телефону 242-55-38 в любое время.</p>
+  <p>По вопросам аренды свободных торговых мест обращайтесь по телефонам:</p>
+  <p>+7-921-941-10-83 Леонид Анатольевич</p>
+</div></div>
+</body></html>`
+
+// TestCollectSiteNumbers_PlainTextContacts_SelfNoiseScriptChildNotDescended is
+// the merge-gating regression from the pr-review-council: a JSON-LD <script>
+// sibling among the coarse-scope children must NOT become the role-scan root.
+// The leasing number must still classify departmental via the real «аренды»
+// heading, and its RoleLabelRaw must not leak the script/JSON text.
+func TestCollectSiteNumbers_PlainTextContacts_SelfNoiseScriptChildNotDescended(t *testing.T) {
+	t.Parallel()
+	doc := docFromHTML(t, p45SuLeasingWithJSONLDNoiseHTML)
+	nums := CollectSiteNumbers(doc, false)
+
+	leasing := findByValueSubstring(nums, "941-10-83")
+	if leasing == nil {
+		t.Fatalf("leasing number +7-921-941-10-83 missing from SiteNumbers; got %+v", nums)
+	}
+	if !leasing.Role.IsDepartmental() {
+		t.Errorf("leasing candidate Role = %q (IsDepartmental=false), want departmental; RoleLabelRaw=%q — a JSON-LD <script> sibling must not become the role-scan root", leasing.Role, leasing.RoleLabelRaw)
+	}
+	if !strings.Contains(strings.ToLower(leasing.RoleLabelRaw), "аренд") {
+		t.Errorf("leasing candidate RoleLabelRaw = %q, want it to contain %q (the «аренды» heading)", leasing.RoleLabelRaw, "аренд")
+	}
+	if strings.Contains(leasing.RoleLabelRaw, "telephone") || strings.Contains(leasing.RoleLabelRaw, "Organization") || strings.Contains(leasing.RoleLabelRaw, "555-00-11") {
+		t.Errorf("leasing candidate RoleLabelRaw = %q leaked the JSON-LD <script> text", leasing.RoleLabelRaw)
+	}
+}
+
+// TestCollectSiteNumbers_PlainTextContacts_SelfNoiseStyleChildNotDescended is
+// the <style> twin of the above.
+func TestCollectSiteNumbers_PlainTextContacts_SelfNoiseStyleChildNotDescended(t *testing.T) {
+	t.Parallel()
+	doc := docFromHTML(t, p45SuLeasingWithStyleNoiseHTML)
+	nums := CollectSiteNumbers(doc, false)
+
+	leasing := findByValueSubstring(nums, "941-10-83")
+	if leasing == nil {
+		t.Fatalf("leasing number +7-921-941-10-83 missing from SiteNumbers; got %+v", nums)
+	}
+	if !leasing.Role.IsDepartmental() {
+		t.Errorf("leasing candidate Role = %q (IsDepartmental=false), want departmental; RoleLabelRaw=%q — a <style> sibling must not become the role-scan root", leasing.Role, leasing.RoleLabelRaw)
+	}
+	if !strings.Contains(strings.ToLower(leasing.RoleLabelRaw), "аренд") {
+		t.Errorf("leasing candidate RoleLabelRaw = %q, want it to contain %q (the «аренды» heading)", leasing.RoleLabelRaw, "аренд")
+	}
+	if strings.Contains(leasing.RoleLabelRaw, "badge") || strings.Contains(leasing.RoleLabelRaw, "000 00 00") {
+		t.Errorf("leasing candidate RoleLabelRaw = %q leaked the <style> text", leasing.RoleLabelRaw)
+	}
+}
