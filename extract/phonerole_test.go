@@ -437,3 +437,110 @@ func TestCollectSiteNumbers_ExistingFixturesStayRoleGeneral_NoGoldenChurn(t *tes
 		})
 	}
 }
+
+// TestPhoneRoleLabelText_NavMenuSkippedForRecallWin is the p45.su-observed
+// recall-miss regression (live: p45.su's global "— Main Menu —Главная
+// Покупателям…" nav swallowed a genuinely departmental number's role text).
+// A real departmental heading («По вопросам аренды торговых мест») sits
+// FURTHER BACK than a global <nav class="main-menu"> that is the CLOSER
+// preceding sibling. Without a nav-skip, the closer-first PrevAll scan
+// (precedingSiblingRoleText) returns the nav's own text and stops — the
+// genuinely departmental number never even reaches the real heading further
+// back. With the skip, the nav is passed over and the scan keeps looking
+// backward until it lands on the real heading.
+func TestPhoneRoleLabelText_NavMenuSkippedForRecallWin(t *testing.T) {
+	t.Parallel()
+	const html = `<!doctype html><html><body>
+<div class="rent-info">
+  <h3>По вопросам аренды торговых мест</h3>
+  <nav class="main-menu"><a href="/">Главная</a><a href="/buyers">Покупателям</a></nav>
+  <div><a href="tel:+79219411083">+7 (921) 941-10-83</a></div>
+</div>
+</body></html>`
+	doc := docFromHTML(t, html)
+	node := doc.Find(`a[href="tel:+79219411083"]`).First()
+	if node.Length() == 0 {
+		t.Fatalf("fixture setup: tel: anchor not found")
+	}
+	got := phoneRoleLabelText(node)
+	if !strings.Contains(got, "аренд") {
+		t.Errorf("phoneRoleLabelText = %q, want it to contain %q (the real heading further back, not the closer nav)", got, "аренд")
+	}
+	if !classifyPhoneRole(got).IsDepartmental() {
+		t.Errorf("classifyPhoneRole(%q).IsDepartmental() = false, want true — the nav must not shadow the real departmental heading", got)
+	}
+}
+
+// TestPhoneRoleLabelText_NavMenuOnlyContextStaysEmpty is the fail-safe /
+// no-field-pollution half of the p45.su regression: a phone whose ONLY
+// nearby preceding context is a <nav> global menu (no real role heading
+// anywhere) must return "" — not the menu's own text. Returning the menu
+// text would classify general anyway (menus carry no departmental token),
+// but it would pollute RoleLabelRaw, which is meant to be verbatim role
+// context for a downstream LLM consumer, not unrelated site-chrome prose.
+func TestPhoneRoleLabelText_NavMenuOnlyContextStaysEmpty(t *testing.T) {
+	t.Parallel()
+	const html = `<!doctype html><html><body>
+<div class="wrap">
+  <nav class="main-menu"><a href="/">Главная</a><a href="/buyers">Покупателям</a></nav>
+  <div><a href="tel:+78121234567">+7 (812) 123-45-67</a></div>
+</div>
+</body></html>`
+	doc := docFromHTML(t, html)
+	node := doc.Find(`a[href="tel:+78121234567"]`).First()
+	if node.Length() == 0 {
+		t.Fatalf("fixture setup: tel: anchor not found")
+	}
+	got := phoneRoleLabelText(node)
+	if got != "" {
+		t.Errorf("phoneRoleLabelText = %q, want \"\" — a global nav menu must never be returned as a role label (field pollution)", got)
+	}
+	if classifyPhoneRole(got).IsDepartmental() {
+		t.Errorf("classifyPhoneRole(%q).IsDepartmental() = true, want false", got)
+	}
+}
+
+// TestPhoneRoleLabelText_NavbarClassTokenSkipped proves the class-token arm
+// of isNavigationBoilerplate: a <ul class="navbar"> (no literal <nav> tag)
+// is still recognized as menu chrome and skipped, same as the fail-safe
+// case above.
+func TestPhoneRoleLabelText_NavbarClassTokenSkipped(t *testing.T) {
+	t.Parallel()
+	const html = `<!doctype html><html><body>
+<div class="wrap">
+  <ul class="navbar"><li><a href="/">Главная</a></li><li><a href="/about">О нас</a></li></ul>
+  <div><a href="tel:+78121234567">+7 (812) 123-45-67</a></div>
+</div>
+</body></html>`
+	doc := docFromHTML(t, html)
+	node := doc.Find(`a[href="tel:+78121234567"]`).First()
+	if node.Length() == 0 {
+		t.Fatalf("fixture setup: tel: anchor not found")
+	}
+	got := phoneRoleLabelText(node)
+	if got != "" {
+		t.Errorf("phoneRoleLabelText = %q, want \"\" — ul.navbar is menu chrome by class token", got)
+	}
+}
+
+// TestPhoneRoleLabelText_RoleNavigationAttrSkipped proves the ARIA role-attr
+// arm of isNavigationBoilerplate: a <div role="navigation"> is skipped even
+// though it is neither a <nav> tag nor carries a denylisted class token.
+func TestPhoneRoleLabelText_RoleNavigationAttrSkipped(t *testing.T) {
+	t.Parallel()
+	const html = `<!doctype html><html><body>
+<div class="wrap">
+  <div role="navigation"><a href="/">Главная</a><a href="/about">О нас</a></div>
+  <div><a href="tel:+78121234567">+7 (812) 123-45-67</a></div>
+</div>
+</body></html>`
+	doc := docFromHTML(t, html)
+	node := doc.Find(`a[href="tel:+78121234567"]`).First()
+	if node.Length() == 0 {
+		t.Fatalf("fixture setup: tel: anchor not found")
+	}
+	got := phoneRoleLabelText(node)
+	if got != "" {
+		t.Errorf("phoneRoleLabelText = %q, want \"\" — div[role=navigation] is menu chrome by ARIA role", got)
+	}
+}
