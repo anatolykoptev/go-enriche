@@ -107,7 +107,7 @@ func phoneRoleLabelText(node *goquery.Selection) string {
 		if t := precedingSiblingRoleText(n); t != "" {
 			return cleanRoleLabelText(t)
 		}
-		if depth > 0 {
+		if depth > 0 && !isNavigationBoilerplate(n) {
 			if t := ownTextOf(n); t != "" {
 				return cleanRoleLabelText(t)
 			}
@@ -142,6 +142,9 @@ func phoneRoleLabelText(node *goquery.Selection) string {
 func precedingSiblingRoleText(n *goquery.Selection) string {
 	var found string
 	n.PrevAll().EachWithBreak(func(_ int, sib *goquery.Selection) bool {
+		if isNavigationBoilerplate(sib) {
+			return true // nav/menu chrome — never a role label, keep looking further back
+		}
 		t := strings.TrimSpace(stripNoiseClone(sib).Text())
 		if t == "" {
 			return true // no text here — keep looking further back
@@ -153,6 +156,61 @@ func precedingSiblingRoleText(n *goquery.Selection) string {
 		return false
 	})
 	return found
+}
+
+// navBoilerplateClassTokens are lowercased class/id substrings marking an
+// element as navigation/global-menu chrome — see isNavigationBoilerplate's
+// doc comment. Kept SMALL and high-precision, the same discipline
+// departmentalLabelTokens documents above: these are near-universal CSS
+// conventions for exactly this chrome (menu/nav/navbar/navigation/
+// breadcrumb) and essentially never appear as a substring of an unrelated
+// content class — unlike departmentalBoundaryTokens' Cyrillic-prose
+// collision risk (факс ⊂ факсимиле), there is no comparable false-positive
+// surface for plain-ASCII CSS-class tokens, so a bare strings.Contains
+// (not containsWordToken's letter-bounded match) is precise enough here.
+var navBoilerplateClassTokens = []string{"menu", "nav", "navbar", "navigation", "breadcrumb"}
+
+// isNavigationBoilerplate reports whether sel is navigation/global-menu
+// chrome that must NEVER be treated as a phone's role/label text — used by
+// precedingSiblingRoleText (skip as a preceding-sibling candidate) and
+// phoneRoleLabelText (skip an ancestor's own text) below.
+//
+// This predicate is precision-SAFE BY CONSTRUCTION for phoneRoleLabelText's
+// purpose: skipping a candidate can only push the scan toward the
+// roleGeneral default (the zero value — see PhoneRole's doc comment) or
+// toward a cleaner/further-back real label. It can NEVER manufacture a
+// false DEMOTE, because a genuine departmental role heading («по вопросам
+// аренды торговых мест») never lives inside a site's nav/menu chrome — a
+// global menu carries only navigation links (Главная/Контакты/О нас/…),
+// never a desk-specific role phrase. This is what makes the skip fail-safe
+// rather than merely convenient: the p45.su live bug it fixes (a global
+// "— Main Menu —Главная Покупателям…" nav swallowing a phone's real role
+// context) was ALREADY fail-safe in outcome (no departmental token in nav
+// text ⇒ classified general) — this closes the recall-miss (a real
+// departmental heading further back never gets a chance) and the field-
+// pollution (RoleLabelRaw carrying unrelated menu prose) that bug left
+// behind, without weakening the general-default invariant anywhere.
+//
+// Deliberately LOCAL to this file: does NOT touch stripNoiseClone/
+// removeNoiseSelectors (goquery.go), which strip script/style/noscript/
+// template/svg/head everywhere in the package (applyRegexFallback's
+// junk-avoidance, contactsTextCandidates' clone). Widening that shared
+// strip to also drop nav/menu chrome would change every OTHER caller's
+// scope; this classifier's blast radius stays confined to the role-label
+// scanner alone.
+func isNavigationBoilerplate(sel *goquery.Selection) bool {
+	if sel.Is("nav, menu, [role=navigation], [role=menu], [role=menubar]") {
+		return true
+	}
+	class, _ := sel.Attr("class")
+	id, _ := sel.Attr("id")
+	haystack := strings.ToLower(class + " " + id)
+	for _, tok := range navBoilerplateClassTokens {
+		if strings.Contains(haystack, tok) {
+			return true
+		}
+	}
+	return false
 }
 
 // departmentalLabelTokens are high-precision, case-insensitive substrings
