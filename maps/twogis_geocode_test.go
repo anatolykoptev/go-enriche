@@ -412,3 +412,190 @@ func TestTwoGISGeocoder_EmptyCityUsesAddressOnly(t *testing.T) {
 		t.Errorf("q param %q does not contain address 'Арбат'", lastQ)
 	}
 }
+
+// TestTwoGISGeocoder_MetaCodeNon200_ReturnsError guards FIX 1 (MAJOR): 2GIS
+// returns HTTP 200 with meta.code=429 (quota) or meta.code=403 (bad key).
+// Previously the geocoder ignored meta.code and silently returned PlaceNotFound —
+// over a 1000-place run a single 429 would silently drop every remaining place.
+// Now it must return an ERROR so Resilient/circuit-breaker sees the failure.
+//
+// Regression guard: revert the meta.code check → this test returns nil error
+// (or PlaceNotFound) instead of an error → RED.
+func TestTwoGISGeocoder_MetaCodeNon200_ReturnsError(t *testing.T) {
+	cases := []struct {
+		name     string
+		metaCode int
+	}{
+		{"quota_exhausted_429", http.StatusTooManyRequests},
+		{"bad_key_403", http.StatusForbidden},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			// HTTP transport returns 200; only meta.code signals the failure.
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				// Encode a response where meta.code is non-200 but items is empty.
+				resp := twoGISResponse{}
+				resp.Meta.Code = tc.metaCode
+				_ = json.NewEncoder(w).Encode(resp)
+			}))
+			defer srv.Close()
+
+			g := newTwoGISGeocodeCheckerWithURL(srv.URL)
+
+			result, err := g.Check(context.Background(), "Тест", "Москва", "Тверская, 1")
+			if err == nil {
+				t.Errorf("Check() error = nil, want non-nil error for meta.code=%d (quota/auth failure must not look like PlaceNotFound)", tc.metaCode)
+			}
+			// result may be nil or non-nil; just confirm we did not silently succeed.
+			if result != nil && result.Status != PlaceNotFound {
+				t.Errorf("result.Status = %q, want PlaceNotFound or nil result when meta.code=%d returns error", result.Status, tc.metaCode)
+			}
+		})
+	}
+}
+
+// TestTwoGISGeocoder_ZeroCoordPoint_PlaceNotFound guards FIX 3: 2GIS can return
+// point:{lat:0,lon:0} (Gulf of Guinea) when the address resolves to a structural
+// zero. Previously the first item with a non-nil point was accepted, so a
+// zero-coord item was returned as PlaceOpen at 0,0.
+// Now zero-coord items must be skipped; if all items have zero/nil coords →
+// PlaceNotFound.
+//
+// Regression guard: remove the zero-coord skip → this test returns PlaceOpen
+// with 0,0 → RED.
+func TestTwoGISGeocoder_ZeroCoordPoint_PlaceNotFound(t *testing.T) {
+	resp := makeTwoGISGeocodeResponse([]twoGISItem{
+		{
+			Name:  "Пустая точка",
+			Point: &twoGISPoint{Lat: 0, Lon: 0},
+		},
+	})
+
+	var hits atomic.Int32
+	srv := newTwoGISGeocodeMockServer(t, resp, &hits, nil)
+	defer srv.Close()
+
+	g := newTwoGISGeocodeCheckerWithURL(srv.URL)
+
+	result, err := g.Check(context.Background(), "Тест", "Москва", "Арбат, 5")
+	if err != nil {
+		t.Fatalf("Check() error = %v, want nil (zero-coord is not a transport error)", err)
+	}
+	if result.Status != PlaceNotFound {
+		t.Errorf("status = %q (Lat=%v Lon=%v), want PlaceNotFound (zero-coord point must be skipped)",
+			result.Status, result.OrgData, result.OrgData)
+	}
+}
+
+// TestTwoGISGeocoder_WhitespaceAddress_PlaceNotFoundNoHTTP guards FIX 2: an
+// all-whitespace address passed the old "" gate and burned a 2GIS call.
+// Now strings.TrimSpace check must reject it without any HTTP call.
+//
+// Regression guard: revert to address=="" → whitespace hits the server → RED.
+func TestTwoGISGeocoder_WhitespaceAddress_PlaceNotFoundNoHTTP(t *testing.T) {
+	resp := makeTwoGISGeocodeResponse([]twoGISItem{
+		{Name: "should not be hit", Point: &twoGISPoint{Lat: 1, Lon: 1}},
+	})
+
+	var hits atomic.Int32
+	srv := newTwoGISGeocodeMockServer(t, resp, &hits, nil)
+	defer srv.Close()
+
+	g := newTwoGISGeocodeCheckerWithURL(srv.URL)
+
+	result, err := g.Check(context.Background(), "Тест", "Москва", "   ")
+	if err != nil {
+		t.Fatalf("Check() error = %v, want nil", err)
+	}
+	if result.Status != PlaceNotFound {
+		t.Errorf("status = %q, want PlaceNotFound (whitespace address must short-circuit)", result.Status)
+	}
+	if hits.Load() != 0 {
+		t.Errorf("HTTP server was hit %d times, want 0 (no request for whitespace address)", hits.Load())
+	}
+}
+
+// TestTwoGISGeocoder_MultiItemFirstZeroSecondValid guards FIX 3 multi-item path:
+// when the first item has a zero coord and the second has valid coords, Check
+// must skip the first and return the second's coords.
+//
+// Regression guard: remove zero-coord skip → first item (0,0) is returned → RED.
+func TestTwoGISGeocoder_MultiItemFirstZeroSecondValid(t *testing.T) {
+	resp := makeTwoGISGeocodeResponse([]twoGISItem{
+		{Name: "Нулевая", Point: &twoGISPoint{Lat: 0, Lon: 0}},
+		{Name: "Дом Зингера", AddressName: "Невский проспект, 28", Point: &twoGISPoint{Lat: 59.935858, Lon: 30.325908}, Type: "building"},
+	})
+
+	var hits atomic.Int32
+	srv := newTwoGISGeocodeMockServer(t, resp, &hits, nil)
+	defer srv.Close()
+
+	g := newTwoGISGeocodeCheckerWithURL(srv.URL)
+
+	result, err := g.Check(context.Background(), "Зингер", "Санкт-Петербург", "Невский проспект, 28")
+	if err != nil {
+		t.Fatalf("Check() error = %v, want nil", err)
+	}
+	if result.Status == PlaceNotFound {
+		t.Errorf("status = PlaceNotFound, want PlaceOpen (second item has valid coords)")
+	}
+	if result.OrgData == nil {
+		t.Fatal("OrgData is nil, want populated coords from second item")
+	}
+	if result.OrgData.Latitude != 59.935858 {
+		t.Errorf("Latitude = %f, want 59.935858 (second item's coords)", result.OrgData.Latitude)
+	}
+}
+
+// TestTwoGISGeocoder_AddressNamePopulated guards FIX 5: when fields includes
+// items.address_name and items.name, OrgData.Address and OrgData.Name must be
+// populated from the response.
+//
+// Regression guard: remove items.address_name from fields (or stop populating
+// OrgData.Address) → Address/Name empty → RED.
+func TestTwoGISGeocoder_AddressNamePopulated(t *testing.T) {
+	resp := makeTwoGISGeocodeResponse([]twoGISItem{
+		{
+			Name:        "Дом Зингера",
+			AddressName: "Невский проспект, 28",
+			Point:       &twoGISPoint{Lat: 59.935858, Lon: 30.325908},
+			Type:        "building",
+		},
+	})
+
+	var hits atomic.Int32
+	var lastFields string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		lastFields = r.URL.Query().Get("fields")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	g := newTwoGISGeocodeCheckerWithURL(srv.URL)
+
+	result, err := g.Check(context.Background(), "Зингер", "Санкт-Петербург", "Невский проспект, 28")
+	if err != nil {
+		t.Fatalf("Check() error = %v, want nil", err)
+	}
+	if result.OrgData == nil {
+		t.Fatal("OrgData is nil")
+	}
+	if result.OrgData.Address != "Невский проспект, 28" {
+		t.Errorf("OrgData.Address = %q, want 'Невский проспект, 28' (address_name must be populated)", result.OrgData.Address)
+	}
+	if result.OrgData.Name != "Дом Зингера" {
+		t.Errorf("OrgData.Name = %q, want 'Дом Зингера' (name must be populated)", result.OrgData.Name)
+	}
+	// Verify the fields param actually requested address_name and name.
+	if !strings.Contains(lastFields, "items.address_name") {
+		t.Errorf("fields param %q does not contain 'items.address_name' — 2GIS won't return address", lastFields)
+	}
+	if !strings.Contains(lastFields, "items.name") {
+		t.Errorf("fields param %q does not contain 'items.name' — 2GIS won't return name", lastFields)
+	}
+}

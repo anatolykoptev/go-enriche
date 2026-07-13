@@ -25,9 +25,9 @@ var twoGISGeocodeURL = "https://catalog.api.2gis.com/3.0/items/geocode" //nolint
 // anchors the lookup on the address and returns the first matching building's
 // point.
 //
-// Address-gated: if the caller passes an empty address, Check returns
-// PlaceNotFound immediately so a composite checker can fall through to a
-// name-based checker. Transport errors are returned as errors; API-level
+// Address-gated: if the caller passes an empty or all-whitespace address, Check
+// returns PlaceNotFound immediately so a composite checker can fall through to
+// a name-based checker. Transport errors are returned as errors; API-level
 // failures (non-200, empty items, malformed JSON) return PlaceNotFound with
 // nil error to avoid tripping circuit breakers.
 type TwoGISGeocoder struct {
@@ -50,16 +50,24 @@ func NewTwoGISGeocoder(cfg TwoGISConfig) *TwoGISGeocoder {
 
 // Check geocodes the given address to building-level coordinates.
 //
-// When address is empty, returns PlaceNotFound immediately without an HTTP
-// call — a geocoder requires an address; the caller should use a name-based
-// checker instead.
+// When address is empty or all-whitespace, returns PlaceNotFound immediately
+// without an HTTP call — a geocoder requires an address; the caller should use
+// a name-based checker instead.
 //
 // When the geocoder finds a building, returns PlaceOpen with coords in
-// OrgData.Latitude / OrgData.Longitude. On API errors (non-200, empty result,
-// malformed JSON) returns PlaceNotFound with nil error (fall-through). On
-// transport errors (network failure) returns the error.
+// OrgData.Latitude / OrgData.Longitude. Also populates OrgData.Name and
+// OrgData.Address from the response when 2GIS returns them.
+//
+// Error semantics mirror TwoGISChecker.Check:
+//   - Transport errors (network failure, read failure) → error.
+//   - meta.code != 200 (quota/auth failure, e.g. 403/429) → error so the
+//     Resilient wrapper / circuit breaker can trip. A 429 must NOT look like
+//     "address not found" — over 1000 places that would silently drop every
+//     remaining result.
+//   - HTTP non-200 (server error) → PlaceNotFound, nil (fall-through).
+//   - Empty items or all-zero-coord items → PlaceNotFound, nil (fall-through).
 func (g *TwoGISGeocoder) Check(ctx context.Context, _, city, address string) (*CheckResult, error) {
-	if address == "" {
+	if strings.TrimSpace(address) == "" {
 		return &CheckResult{Status: PlaceNotFound}, nil
 	}
 
@@ -76,7 +84,9 @@ func (g *TwoGISGeocoder) Check(ctx context.Context, _, city, address string) (*C
 		// returns meta.code=200 with coarse fallback items (adm_div, street,
 		// settlement) when no exact building is found. Without this field the
 		// gate cannot distinguish building from centroid.
-		"fields": {"items.point,items.type"},
+		// items.address_name and items.name populate OrgData for downstream
+		// consumers; items.point provides coords (the primary output).
+		"fields": {"items.point,items.type,items.address_name,items.name"},
 		"key":    {g.apiKey},
 	}
 
@@ -98,7 +108,7 @@ func (g *TwoGISGeocoder) Check(ctx context.Context, _, city, address string) (*C
 
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
-		return &CheckResult{Status: PlaceNotFound}, nil //nolint:nilerr
+		return nil, fmt.Errorf("2gis geocode: read: %w", err)
 	}
 
 	var gr twoGISResponse
@@ -106,46 +116,61 @@ func (g *TwoGISGeocoder) Check(ctx context.Context, _, city, address string) (*C
 		return &CheckResult{Status: PlaceNotFound}, nil //nolint:nilerr
 	}
 
+	// Mirror TwoGISChecker: non-200 meta.code signals quota exhaustion (429)
+	// or auth failure (403). These arrive with HTTP 200 + empty items, so they
+	// would otherwise silently degrade to PlaceNotFound. Return an error so
+	// the Resilient wrapper records it and the breaker can trip.
+	if gr.Meta.Code != http.StatusOK {
+		return nil, fmt.Errorf("2gis geocode: meta code %d", gr.Meta.Code)
+	}
+
 	if len(gr.Result.Items) == 0 {
 		return &CheckResult{Status: PlaceNotFound}, nil
 	}
 
-	// Take the first item that has a non-nil point AND building-level precision.
-	//
-	// Accept-set (verified via 2GIS /items/geocode with key=demo):
-	//   "building" — exact address resolution to a building polygon/point.
-	//   "branch"   — business branch tied to a building; carries a real building
-	//                point (not a centroid).
-	//
-	// Reject-set (coarse fallbacks — confident-WRONG for a specific address):
-	//   "adm_div"    — administrative division centroid (city, district, etc.)
-	//   "street"     — street midpoint/centroid
-	//   "settlement" — settlement centroid
-	//   ""           — unknown / field not returned; reject for safety
-	//
-	// Rejected items are skipped; if no building-level item is found the
-	// composite falls through to the by-name anchored checker.
-	for _, item := range gr.Result.Items {
-		if item.Point == nil {
+	if od := selectBestGeocodeItem(gr.Result.Items); od != nil {
+		return &CheckResult{
+			Status:   PlaceOpen,
+			RawTitle: od.Name,
+			OrgData:  od,
+		}, nil
+	}
+
+	// All items have nil or zero-coord points, or no building-level item.
+	return &CheckResult{Status: PlaceNotFound}, nil
+}
+
+// selectBestGeocodeItem returns the first 2GIS geocode item that has a
+// non-zero point and building-level precision.
+//
+// Accept-set (verified via 2GIS /items/geocode with key=demo):
+//   "building" — exact address resolution to a building polygon/point.
+//   "branch"   — business branch tied to a building; carries a real building
+//                point (not a centroid).
+//
+// Reject-set (coarse fallbacks — confident-WRONG for a specific address):
+//   "adm_div"    — administrative division centroid (city, district, etc.)
+//   "street"     — street midpoint/centroid
+//   "settlement" — settlement centroid
+//   ""           — unknown / field not returned; reject for safety
+//
+// 2GIS can also return point:{lat:0,lon:0} (Gulf of Guinea) when the
+// address resolves to a structural zero — those are skipped first.
+func selectBestGeocodeItem(items []twoGISItem) *OrgData {
+	for _, item := range items {
+		if item.Point == nil || (item.Point.Lat == 0 && item.Point.Lon == 0) {
 			continue
 		}
 		if item.Type != twoGISItemTypeBuilding && item.Type != "branch" {
 			continue
 		}
-		od := &OrgData{
+		return &OrgData{
 			Status:    PlaceOpen,
 			Name:      item.Name,
 			Address:   item.AddressName,
 			Latitude:  item.Point.Lat,
 			Longitude: item.Point.Lon,
 		}
-		return &CheckResult{
-			Status:   PlaceOpen,
-			RawTitle: item.Name,
-			OrgData:  od,
-		}, nil
 	}
-
-	// All items have no point — treat as not-found.
-	return &CheckResult{Status: PlaceNotFound}, nil
+	return nil
 }
