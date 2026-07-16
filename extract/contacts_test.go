@@ -169,14 +169,21 @@ func TestApplyContactOverride_CallTrackingNestedInContactsIsDemoted(t *testing.T
 
 // The headline DNI regression: a Roistat-style site whose visible (812) tel:
 // href + microdata is a rotating proxy must resolve to its hard-coded WhatsApp
-// social-link number, NOT the rotating (812). Asserts both the SPb-city path
-// (where the area-code rule would otherwise pick the local (812)) and the
-// no-city path.
+// social-link number, NOT the rotating (812). The DNI vendor script MUST be
+// present so detectDNIVendor triggers the DNI branch in resolvePhoneForCityDNI,
+// which picks the social-link candidate unconditionally (it is the only
+// DNI-immune source). Without the DNI script the page is clean and the
+// labeled contacts-region tel: wins (issue #55). Asserts both the SPb-city
+// path (where the area-code rule would otherwise pick the local (812)) and
+// the no-city path.
 func TestApplyContactOverride_SocialLinkBeatsRotatingTel(t *testing.T) {
 	t.Parallel()
 	// Mirrors royal-wed.ru: a contacts-region (812) tel: (the DNI slot) plus a
-	// matching 8x microdata (812), plus the stable WhatsApp social link.
-	html := `<html><body>
+	// matching 8x microdata (812), plus the stable WhatsApp social link. The
+	// Roistat loader script triggers the DNI branch.
+	html := `<html><head>
+	<script src="//cloud.roistat.com/api/site/1.0/abc/init"></script>
+	</head><body>
 	<header class="header">
 	  <a href="tel:+78129561840">+7 (812) 956-18-40</a>
 	  <a href="https://api.whatsapp.com/send?phone=79219561840">WhatsApp</a>
@@ -197,6 +204,84 @@ func TestApplyContactOverride_SocialLinkBeatsRotatingTel(t *testing.T) {
 		if *facts.Phone == "+7 (812) 956-18-40" {
 			t.Errorf("city=%q: must NOT assert the rotating DNI (812) proxy", city)
 		}
+	}
+}
+
+// TestResolvePhoneForCity_SocialLinkDoesNotBeatLabeledTel is the issue #55
+// regression: a CLEAN (no DNI vendor) page that carries BOTH a labeled
+// contacts-region tel: (the venue's own office phone) AND a WhatsApp
+// click-to-chat link embedding a DIFFERENT number (often a manager's personal
+// mobile). The labeled contacts-region phone MUST win — a social-link number
+// is DNI-immune but is not necessarily the number a listing should display;
+// it must not unconditionally override the page's own labeled phone.
+//
+// Reproduces the live spb03.com case: header + footer both label
+// +7(812)-214-61-41 as "Телефон", while a WhatsApp link embeds the unrelated
+// 79219551631. Before the fix, pickPhoneCandidate's unconditional social-link
+// pre-check (rule 1) picked the WhatsApp number and the real labeled phone
+// was flagged "wrong" downstream.
+func TestResolvePhoneForCity_SocialLinkDoesNotBeatLabeledTel(t *testing.T) {
+	t.Parallel()
+	// Clean page (no DNI vendor script): a labeled contacts-region tel: plus
+	// a WhatsApp link with a DIFFERENT number — the spb03.com shape.
+	html := `<html><body>
+	<header class="header">
+	  Телефон: <a href="tel:+78122146141">+7 (812) 214-61-41</a>
+	  <a href="https://api.whatsapp.com/send?phone=79219551631">WhatsApp</a>
+	</header>
+	<footer class="footer">
+	  Телефон: <a href="tel:+78122146141">+7 (812) 214-61-41</a>
+	</footer>
+	</body></html>`
+
+	// Unit-level: resolvePhoneForCity must pick the labeled 812, not the
+	// WhatsApp 921.
+	doc, err := documentFromHTML(html)
+	if err != nil || doc == nil {
+		t.Fatalf("parse: %v", err)
+	}
+	phone, _, ok := resolvePhoneForCity(doc, "Санкт-Петербург")
+	if !ok {
+		t.Fatal("want a resolved phone, got !ok")
+	}
+	if phone != "+7 (812) 214-61-41" {
+		t.Errorf("resolvePhoneForCity: want labeled +7 (812) 214-61-41, got %q (the WhatsApp number must NOT override the labeled contacts-region tel: on a clean page)", phone)
+	}
+
+	// End-to-end: ExtractFactsForCity must commit the labeled 812 as
+	// Facts.Phone.
+	facts := ExtractFactsForCity(html, "https://spb03.com", "Санкт-Петербург")
+	if facts.Phone == nil {
+		t.Fatal("Facts.Phone = nil, want the labeled contacts-region phone")
+	}
+	if *facts.Phone != "+7 (812) 214-61-41" {
+		t.Errorf("Facts.Phone = %q, want labeled +7 (812) 214-61-41 (not the WhatsApp +79219551631)", *facts.Phone)
+	}
+}
+
+// TestResolvePhoneForCity_SocialLinkStillWinsWhenOnlyCandidate guards the
+// flip side of issue #55: when a social-link number is the ONLY phone
+// candidate on the page (no labeled contacts-region tel:), it must still be
+// picked — the DNI-immunity value is preserved as a fallback-when-nothing-
+// else-exists. This is the case where a social-link number IS the right
+// answer.
+func TestResolvePhoneForCity_SocialLinkStillWinsWhenOnlyCandidate(t *testing.T) {
+	t.Parallel()
+	html := `<html><body>
+	<header class="header">
+	  <a href="https://api.whatsapp.com/send?phone=79219551631">WhatsApp</a>
+	</header>
+	</body></html>`
+	doc, err := documentFromHTML(html)
+	if err != nil || doc == nil {
+		t.Fatalf("parse: %v", err)
+	}
+	phone, _, ok := resolvePhoneForCity(doc, "Санкт-Петербург")
+	if !ok {
+		t.Fatal("want a resolved phone, got !ok")
+	}
+	if phone != "+79219551631" {
+		t.Errorf("want social-link +79219551631 (only candidate), got %q", phone)
 	}
 }
 

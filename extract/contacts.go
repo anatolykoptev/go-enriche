@@ -69,7 +69,7 @@ const (
 	tierContacts    = 3 // a tel: in the header/footer/address/contacts region
 	tierBranchJSON  = 4 // a phone read from a national-chain inline-script branch-locator JSON (branchjson.go) — anchored, NOT DNI-immune
 	tierSchemaPlace = 5 // a phone read from schema.org MULTI-LOCATION structured data, one entry per branch (schemaplace.go) — same trust class as tierBranchJSON: anchored, NOT DNI-immune, distinct Source for accurate provenance (see numSourceSchemaPlace)
-	tierSocialLink  = 6 // a hard-coded wa.me / api.whatsapp.com phone — DNI-immune
+	tierSocialLink  = 6 // a hard-coded wa.me / api.whatsapp.com phone — DNI-immune; top authority for SiteNumbers trust/dedup, demoted below tierContacts for the single-winner pick (pickTier, issue #55)
 )
 
 // tollFreeAreaCode is the 8-800 toll-free / call-tracking area code. An 8-800
@@ -102,7 +102,12 @@ const callTrackingSelectors = "[class*=calltrack], [class*=calltouch], [class*=c
 // tel: slot. On a DNI site (e.g. Roistat/Calltouch rotating the visible (812)
 // header number) the social-link number is the only phone invariant that
 // survives every fetch — raw HTTP or JS-rendered — so it is ranked as the TOP
-// phone authority (tierSocialLink), above any injected/rotating tel:.
+// phone authority (tierSocialLink) for the SiteNumbers trust view / dedup.
+// For the single-winner city-guide pick (pickPhoneCandidate) it is demoted
+// below tierContacts via pickTier (issue #55: a WhatsApp number may be a
+// separate messaging contact, not the venue's labeled office phone). On a
+// DNI-active page the DNI branch (resolvePhoneForCityDNI) still picks it
+// unconditionally — it is the only DNI-immune source.
 //
 // Telegram t.me/<handle> carries a handle, not a number, so it is not a phone
 // source on its own; only wa.me / api.whatsapp.com/send?phone= yield a number.
@@ -115,8 +120,10 @@ const socialLinkSelectors = `a[href*="wa.me/"], a[href*="api.whatsapp.com/send"]
 // Phone preference order (highest first):
 //  1. tel: href inside a contacts region (header/footer/address/contacts),
 //     not inside an embedded widget;
-//  2. microdata [itemprop=telephone];
-//  3. any other valid tel: href on the page (body), widgets last.
+//  2. a hard-coded social-link phone (wa.me / api.whatsapp.com) — DNI-immune,
+//     but not an override of the venue's own labeled phone (issue #55);
+//  3. any other valid tel: href on the page (body), widgets last;
+//  4. microdata [itemprop=telephone].
 //
 // Every returned phone must pass ValidatePhone; an invalid candidate is
 // skipped, never returned.
@@ -127,21 +134,24 @@ func ExtractSiteContacts(html string) SiteContacts {
 		return out
 	}
 
-	// A hard-coded social-link phone (wa.me / api.whatsapp.com) is the
-	// DNI-immune top authority — see socialLinkSelectors. Prefer it over any
-	// tel:/microdata, which a call-tracking widget can rotate.
-	if sl := socialLinkCandidates(doc); len(sl) > 0 {
+	// A contacts-region tel: (the venue's own labeled phone) outranks a
+	// social-link number, which may be a separate messaging contact (e.g. a
+	// manager's personal mobile) — issue #55. A social-link number still
+	// outranks a body tel: and microdata (DNI-immune fallback).
+	phone, region := bestTelPhone(doc)
+	if phone != nil && region == regionContacts {
+		out.Phone = phone
+		out.PhoneRegion = region
+	} else if sl := socialLinkCandidates(doc); len(sl) > 0 {
 		v := sl[0].value
 		out.Phone = &v
 		out.PhoneRegion = regionContacts
-	} else {
-		out.Phone, out.PhoneRegion = bestTelPhone(doc)
-		if out.Phone == nil {
-			if mp := microdataPhone(doc); mp != nil {
-				out.Phone = mp
-				out.PhoneRegion = regionMicrodata
-			}
-		}
+	} else if phone != nil {
+		out.Phone = phone
+		out.PhoneRegion = region
+	} else if mp := microdataPhone(doc); mp != nil {
+		out.Phone = mp
+		out.PhoneRegion = regionMicrodata
 	}
 	out.Email = firstMailto(doc)
 	return out
@@ -436,8 +446,16 @@ func telTier(s *goquery.Selection) int {
 // socialLinkCandidates collects phones embedded in WhatsApp click-to-chat
 // hrefs (wa.me/<digits> or api.whatsapp.com/send?phone=<digits>). These are
 // hard-coded, owned numbers immune to call-tracking DNI rotation, so they are
-// emitted at tierSocialLink — the top phone authority. An 8-800 is still
-// demoted (makeCandidate), though a toll-free WhatsApp link is unheard of.
+// emitted at tierSocialLink — the top phone authority for the SiteNumbers
+// trust view / dedup (CollectSiteNumbers, sitenumbers.go). For the
+// single-winner city-guide pick (pickPhoneCandidate) a social-link candidate
+// is demoted below tierContacts via pickTier, so a page's own labeled
+// contacts-region phone wins when both exist (issue #55: a business may
+// publish a separate WhatsApp contact alongside its real labeled office
+// phone). The DNI-active page path (resolvePhoneForCityDNI's DNI branch)
+// still picks the social-link candidate unconditionally — it is the only
+// DNI-immune source. An 8-800 is still demoted (makeCandidate), though a
+// toll-free WhatsApp link is unheard of.
 func socialLinkCandidates(doc *goquery.Document) []phoneCandidate {
 	var out []phoneCandidate
 	doc.Find(socialLinkSelectors).Each(func(_ int, s *goquery.Selection) {
@@ -608,22 +626,49 @@ func socialLinkIndex(cands []phoneCandidate) int {
 	return -1
 }
 
+// pickTier is the DISPLAY-rank tier pickPhoneCandidate uses to compare
+// candidates. It demotes a social-link candidate below tierContacts so a
+// page's own labeled contacts-region phone wins the single-winner pick — a
+// WhatsApp number is DNI-immune but may be a separate messaging contact
+// (e.g. a manager's personal mobile), not necessarily the number a listing
+// should display (issue #55). The demotion is pick-only: the candidate's
+// naturalTier (and thus CollectSiteNumbers' trust view / dedup, which keys
+// off naturalTier) is unchanged — a social-link reading still wins the
+// SiteNumbers tier-collision dedup against a weaker branch-JSON/schema-place
+// reading of the same digits, preserving the DNI-immunity rationale there.
+//
+// The demoted value sits at tierBody so a social-link number still outranks
+// microdata/og: (a deliberate contact channel vs an injected structured
+// value) and ties body tel: — winning the tie by candidate order
+// (social-link candidates are appended before tel: candidates in
+// collectPhoneCandidates, so the social-link wins a same-tier tie).
+func pickTier(c phoneCandidate) int {
+	if c.tier == tierSocialLink {
+		return tierBody
+	}
+	return c.tier
+}
+
 // pickPhoneCandidate selects the best candidate on a clean (non-DNI) page:
-//  1. a hard-coded social-link phone (tierSocialLink) wins UNCONDITIONALLY —
-//     it is the agency's owned number, immune to DNI rotation, and beats the
-//     local-area-code tiebreaker (a mobile/social number need not carry the
-//     city's landline area code);
-//  2. else the highest-tier candidate local to the city (area-code rule), so
+//  1. the highest-tier candidate local to the city (area-code rule), so
 //     SPb 812 microdata beats a Moscow 925 tel: on a multi-city venue;
-//  3. else source-order (tier) ranking — contacts tel: > body tel: >
+//  2. else source-order (tier) ranking — contacts tel: > body tel: >
 //     microdata/og: > demoted — the plain tel:-wins fallback.
+//
+// A social-link phone (tierSocialLink) is DNI-immune but is NOT an
+// unconditional override of a page's own labeled contacts-region phone
+// (issue #55: a business may publish a separate WhatsApp contact — often a
+// manager's personal mobile — alongside its real labeled office phone). It
+// is demoted below tierContacts via pickTier for the single-winner pick, so
+// a labeled contacts-region tel: wins when both exist. The social-link
+// number still wins when it is the only candidate (no labeled phone present)
+// — the DNI-immunity value is preserved as a fallback-when-nothing-else-
+// exists. The DNI-active page path (resolvePhoneForCityDNI's DNI branch)
+// is unaffected: it explicitly finds the social-link candidate via
+// socialLinkIndex + dniTrustworthy, bypassing pickPhoneCandidate entirely.
 //
 // cands is guaranteed non-empty by the caller.
 func pickPhoneCandidate(cands []phoneCandidate, city string) (phone, region string) {
-	if i := socialLinkIndex(cands); i >= 0 {
-		return cands[i].value, regionForTier(cands[i].tier)
-	}
-
 	if expected := expectedAreaCodes(city); len(expected) > 0 {
 		if i := bestLocalCandidate(cands, expected); i >= 0 {
 			return cands[i].value, regionForTier(cands[i].tier)
@@ -632,7 +677,7 @@ func pickPhoneCandidate(cands []phoneCandidate, city string) (phone, region stri
 
 	best := 0
 	for i := range cands {
-		if cands[i].tier > cands[best].tier {
+		if pickTier(cands[i]) > pickTier(cands[best]) {
 			best = i
 		}
 	}
@@ -640,14 +685,16 @@ func pickPhoneCandidate(cands []phoneCandidate, city string) (phone, region stri
 }
 
 // bestLocalCandidate returns the index of the highest-tier candidate whose area
-// code is local to the city, or -1 when none is local.
+// code is local to the city, or -1 when none is local. Uses pickTier so a
+// social-link candidate is demoted below a labeled contacts-region candidate
+// even when both are city-local (see pickTier / pickPhoneCandidate).
 func bestLocalCandidate(cands []phoneCandidate, expected []int) int {
 	best := -1
 	for i := range cands {
 		if !areaCodeMatches(cands[i].areaCode, expected) {
 			continue
 		}
-		if best < 0 || cands[i].tier > cands[best].tier {
+		if best < 0 || pickTier(cands[i]) > pickTier(cands[best]) {
 			best = i
 		}
 	}
