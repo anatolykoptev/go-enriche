@@ -69,13 +69,16 @@ func TestGoldenRegression_ExtractFacts(t *testing.T) {
 			wantNotPhone: "+7 (812) 956-18-40",
 		},
 		{
-			// Same fixture, NO city hint: the social-link phone is still chosen
-			// (it is the highest tier), so the rotating (812) is never asserted
-			// regardless of city signal. NOTE: this case alone does NOT isolate
-			// the social-link PRE-CHECK in resolvePhoneForCity — with the city
-			// known and a local 812 present, the pre-check must beat the
-			// area-code tiebreaker; that is guarded by the SPb case above and by
-			// TestResolvePhoneForCity_SocialLinkBeatsLocalAreaCode.
+			// Same fixture, NO city hint: the social-link phone is still chosen,
+			// so the rotating (812) is never asserted regardless of city signal.
+			// This fixture carries a DNI vendor script (Roistat), so the win
+			// comes from resolvePhoneForCityDNI's DNI branch (socialLinkIndex +
+			// dniTrustworthy), which picks the social-link candidate
+			// unconditionally — it is the only DNI-immune source (see
+			// pickPhoneCandidate's doc comment, issue #55). On a CLEAN page
+			// (no DNI vendor) a labeled contacts-region tel: would instead win
+			// over a social-link number — see
+			// TestResolvePhoneForCity_SocialLinkDoesNotBeatLabeledTel.
 			name:         "royal_wed_no_city_social_link_still_wins",
 			fixture:      "royal-wed.html",
 			city:         "",
