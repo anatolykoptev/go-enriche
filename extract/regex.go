@@ -6,16 +6,30 @@ import (
 )
 
 // Pre-compiled regex patterns for Russian and English fact extraction.
+//
+// rePrice requires the captured text to START with a price-shaped token —
+// an optional "от"/"до"/"from" prefix followed by a digit, a Western
+// currency symbol ($, €, £ — conventionally placed before the number), or
+// an explicit "бесплатно"/"free" indicator — and caps the capture at ~30
+// chars (a bare price rarely exceeds that). This rejects marketing prose
+// where "цена"/"стоимость" is part of a sentence (e.g. "Цена: уборки за 30
+// минут гарантированно!"), which the old `[^\n<]{2,80}` pattern captured
+// verbatim as a garbage price fact (issue #56). The Russian ₽ symbol is
+// intentionally NOT a valid start token: it conventionally FOLLOWS the
+// number ("1500 ₽"), so a leading ₽ is almost always a schema.org price-
+// tier symbol ("₽₽"/"₽₽₽") rather than a real price. A bare currency symbol
+// that still slips through is caught downstream by ValidatePrice's digit
+// requirement.
 var (
 	reAddress = regexp.MustCompile(`(?i)(?:адрес|address)[:\s]+([^\n<]{5,100})`)
 	rePhone   = regexp.MustCompile(`(?:\+7|8)[\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}`)
-	rePrice   = regexp.MustCompile(`(?i)(?:цена|стоимость|price)[:\s]+([^\n<]{2,80})`)
+	rePrice   = regexp.MustCompile(`(?i)(?:цена|стоимость|price)[:\s]+((?:от\s+|до\s+|from\s+)?(?:бесплатно|free|[\d$€£])[^\n<]{0,29})`)
 )
 
 // Plain-text-safe variants (no HTML < boundary).
 var (
 	reSnippetAddress = regexp.MustCompile(`(?i)(?:адрес|address)[:\s]+([^\n]{5,100})`)
-	reSnippetPrice   = regexp.MustCompile(`(?i)(?:цена|стоимость|price)[:\s]+([^\n]{2,80})`)
+	reSnippetPrice   = regexp.MustCompile(`(?i)(?:цена|стоимость|price)[:\s]+((?:от\s+|до\s+|from\s+)?(?:бесплатно|free|[\d$€£])[^\n]{0,29})`)
 )
 
 

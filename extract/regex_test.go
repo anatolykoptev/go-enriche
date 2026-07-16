@@ -2,6 +2,7 @@ package extract
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -93,6 +94,64 @@ func TestRegexPrice_NotFound(t *testing.T) {
 	price := regexPrice(text)
 	if price != nil {
 		t.Errorf("expected nil, got %v", *price)
+	}
+}
+
+// TestRegexPrice_RejectsProseAfterKeyword guards issue #56: rePrice used to
+// capture ANY 2-80 chars after "цена"/"стоимость"/"price", so marketing prose
+// where the keyword is part of a sentence (not followed by a figure) leaked
+// through as a garbage "price" fact. The regex must require a price-shaped
+// token (digit, currency symbol, or от/до/free prefix + digit) right after
+// the keyword, rejecting prose like "уборки за 30 минут".
+func TestRegexPrice_RejectsProseAfterKeyword(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		text string
+	}{
+		{"prose with incidental digit", "Цена: уборки за 30 минут гарантированно!"},
+		{"prose with seconds", "Цена: уборки за 10 секунд!"},
+		{"schema tier symbol no digit", "Цена: ₽₽ за уборку"},
+		{"tickets prose", "стоимость билетов ...: Ботанический сад"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			price := regexPrice(tt.text)
+			if price != nil {
+				t.Errorf("expected nil price for %q, got %q", tt.text, *price)
+			}
+		})
+	}
+}
+
+// TestRegexPrice_AcceptsRealPrices ensures the tightened regex still captures
+// legitimate price shapes — bare amount, range, currency-prefixed, free.
+func TestRegexPrice_AcceptsRealPrices(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		text string
+		want string // substring the capture must contain
+	}{
+		{"bare rubles", "Цена: 1500 руб.", "1500"},
+		{"range rubles", "Стоимость: от 2300 до 4500 рублей", "2300"},
+		{"dollar", "Price: $25 per person", "25"},
+		{"from prefix", "Стоимость: от 200 рублей", "200"},
+		{"free keyword", "Стоимость: бесплатно (0 руб)", "бесплатно"},
+		{"range with symbol", "Цена: 1500-2500 ₽", "1500"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			price := regexPrice(tt.text)
+			if price == nil {
+				t.Fatalf("expected price for %q, got nil", tt.text)
+			}
+			if !strings.Contains(*price, tt.want) {
+				t.Errorf("expected capture containing %q, got %q", tt.want, *price)
+			}
+		})
 	}
 }
 
