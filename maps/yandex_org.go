@@ -159,24 +159,7 @@ func parseOrgPageJSON(html []byte) *OrgData {
 	od := &OrgData{}
 
 	// Status (from the business data block, not the whole HTML — more precise).
-	switch data.Status {
-	case yandexStatusPermanentClosed:
-		od.Status = PlacePermanentClosed
-	case yandexStatusTemporaryClosed:
-		od.Status = PlaceTemporaryClosed
-	case yandexStatusOpen:
-		od.Status = PlaceOpen
-	default:
-		// Fall back to the HTML-wide status regex if the block didn't have it.
-		switch parseOrgStatus(html) {
-		case yandexStatusPermanentClosed:
-			od.Status = PlacePermanentClosed
-		case yandexStatusTemporaryClosed:
-			od.Status = PlaceTemporaryClosed
-		case yandexStatusOpen:
-			od.Status = PlaceOpen
-		}
-	}
+	od.Status = resolveOrgStatus(data, html)
 
 	// Name: prefer shortTitle, then chain.name, then legacy "name".
 	od.Name = firstNonEmpty(data.ShortTitle, data.Chain.Name, data.Name)
@@ -185,15 +168,7 @@ func parseOrgPageJSON(html []byte) *OrgData {
 	od.Address = firstNonEmpty(data.FullAddress, data.Address.Formatted)
 
 	// Phone: prefer "number" field, then legacy "formatted".
-	for _, p := range data.Phones {
-		if p.Number != "" {
-			od.Phone = p.Number
-			break
-		}
-		if p.Formatted != "" {
-			od.Phone = p.Formatted
-		}
-	}
+	od.Phone = resolveOrgPhone(data.Phones)
 
 	// Hours: prefer currentWorkingStatus.text, then legacy hours.text.
 	od.Hours = firstNonEmpty(data.CurrentWorkingStatus.Text, data.Hours.Text)
@@ -234,6 +209,51 @@ func parseOrgPageJSON(html []byte) *OrgData {
 	}
 
 	return od
+}
+
+// yandexStatusToPlaceStatus maps a Yandex wire-status string (as embedded in
+// the org page JSON or returned by parseOrgStatus) to our PlaceStatus enum.
+// Returns the empty PlaceStatus ("") for an empty/unknown input so callers
+// can detect "no status found" and apply their own fallback.
+func yandexStatusToPlaceStatus(status string) PlaceStatus {
+	switch status {
+	case yandexStatusPermanentClosed:
+		return PlacePermanentClosed
+	case yandexStatusTemporaryClosed:
+		return PlaceTemporaryClosed
+	case yandexStatusOpen:
+		return PlaceOpen
+	default:
+		return ""
+	}
+}
+
+// resolveOrgStatus resolves the business status from the parsed business-data
+// block, falling back to the HTML-wide status regex when the block didn't
+// carry a recognized status field.
+func resolveOrgStatus(data yandexBusinessData, html []byte) PlaceStatus {
+	if s := yandexStatusToPlaceStatus(data.Status); s != "" {
+		return s
+	}
+	return yandexStatusToPlaceStatus(parseOrgStatus(html))
+}
+
+// resolveOrgPhone picks the best phone number from the parsed phones list,
+// preferring the "number" field and falling back to "formatted". The first
+// phone with a non-empty "number" wins; otherwise the last phone with a
+// non-empty "formatted" wins (matching the original loop's overwrite
+// semantics — it did not break on "formatted").
+func resolveOrgPhone(phones []yandexPhone) string {
+	var phone string
+	for _, p := range phones {
+		if p.Number != "" {
+			return p.Number
+		}
+		if p.Formatted != "" {
+			phone = p.Formatted
+		}
+	}
+	return phone
 }
 
 // extractBusinessJSON locates the business data JSON object in rendered HTML
