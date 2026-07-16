@@ -20,14 +20,21 @@ func DigitsOnly(s string) string {
 const maxPriceLen = 60
 
 var (
-	reCSS           = regexp.MustCompile(`[{}]|\w+\s*:\s*\w+\s*;|:\s*\w+\(|margin|padding|display|font-size`)
-	reHTMLTag       = regexp.MustCompile(`<[a-zA-Z/]`)
-	reJSCode        = regexp.MustCompile(`(?:var |const |let |function |=>|===)`)
-	rePriceCurrency = regexp.MustCompile(`(?i)(?:\d|бесплатно|free|₽|руб|\$|€|£)`)
+	reCSS        = regexp.MustCompile(`[{}]|\w+\s*:\s*\w+\s*;|:\s*\w+\(|margin|padding|display|font-size`)
+	reHTMLTag    = regexp.MustCompile(`<[a-zA-Z/]`)
+	reJSCode     = regexp.MustCompile(`(?:var |const |let |function |=>|===)`)
+	rePriceDigit = regexp.MustCompile(`\d`)
+	rePriceFree  = regexp.MustCompile(`(?i)(?:бесплатно|free)`)
 )
 
 // ValidatePrice checks if a price string looks like an actual price
 // rather than CSS, HTML, JS code, or unrelated text.
+//
+// A real price must contain at least one digit, or be an explicit "free"
+// indicator (бесплатно/free). A bare currency symbol like "₽₽" (a
+// schema.org price-tier symbol) or digit-free marketing prose is NOT a
+// price — returning false here yields a nil fact (fail-open downstream)
+// rather than a garbage string that forces a false price-mismatch (issue #56).
 func ValidatePrice(price string) bool {
 	price = strings.TrimSpace(price)
 	if price == "" {
@@ -38,7 +45,7 @@ func ValidatePrice(price string) bool {
 		return false
 	}
 
-	if !rePriceCurrency.MatchString(price) {
+	if !rePriceDigit.MatchString(price) && !rePriceFree.MatchString(price) {
 		return false
 	}
 
