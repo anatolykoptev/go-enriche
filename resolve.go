@@ -74,10 +74,8 @@ type confidence string
 
 const (
 	confHigh confidence = "high"
-	confLow  confidence = "low"
-	// confMedium ("medium") is reserved for the finer official_site gradation
-	// (not-own-domain / regex-only / DNI-rotating) and is introduced in the
-	// follow-up sub-phase that actually emits it.
+	confLow   confidence = "low"
+	confMedium confidence = "medium"
 )
 
 // confidenceFor derives the agent-facing confidence from the winning source
@@ -95,6 +93,29 @@ func confidenceFor(src fieldSource) confidence {
 	default:
 		return confLow
 	}
+}
+
+// confidenceForMaps derives confidence for maps-sourced fields based on data
+// richness. When the maps org card provides verifiable contact data (phone AND
+// website), the confidence is medium — the data came from a structured business
+// listing (Yandex Maps / 2GIS), not a vague search snippet, and the phone+website
+// pair is independently verifiable. When only partial data is available, falls
+// back to low (same as the generic confidenceFor for sourceMaps).
+//
+// This prevents the quality gate from rejecting enrichment results that have
+// solid contact data just because the source is "maps" rather than
+// "official_site". The official site still wins on conflict (higher source
+// priority); this only affects the confidence bucket when maps is the sole
+// provider for a field.
+func confidenceForMaps(od *maps.OrgData) confidence {
+	if od == nil {
+		return confLow
+	}
+	// Rich data: phone + website both present → medium confidence.
+	if od.Phone != "" && od.Website != "" {
+		return confMedium
+	}
+	return confLow
 }
 
 // fieldProv is the resolved provenance of one field: which source last won and
@@ -176,6 +197,32 @@ func (r *resolver) set(dst **string, owner *fieldProv, val string, src fieldSour
 		*dst = &v
 		owner.source = src
 		owner.conf = confidenceFor(src)
+	}
+}
+
+
+// setWithConf is set() with an explicit confidence override. Used by mergeOrg
+// to apply confidenceForMaps (data-richness-aware) instead of the generic
+// confidenceFor(sourceMaps) which always returns confLow.
+func (r *resolver) setWithConf(dst **string, owner *fieldProv, val string, src fieldSource, conf confidence, field string) {
+	if val == "" {
+		return
+	}
+	if *dst != nil && **dst != val && src != owner.source && owner.source > sourceNone && src > sourceNone {
+		r.m.conflict(field)
+	}
+	if src >= owner.source {
+		v := val
+		*dst = &v
+		owner.source = src
+		owner.conf = conf
+		return
+	}
+	if *dst == nil && owner.source == sourceNone {
+		v := val
+		*dst = &v
+		owner.source = src
+		owner.conf = conf
 	}
 }
 
@@ -277,11 +324,12 @@ func (r *resolver) seedOperatorValues(s SeedFacts) {
 // "fill if absent" semantics (source coords from the item already won upstream
 // via seedSourceCoords; maps only fills a still-empty pair).
 func (r *resolver) mergeOrg(od *maps.OrgData) {
-	r.set(&r.facts.PlaceName, &r.prov.placeName, od.Name, sourceMaps, "place_name")
-	r.set(&r.facts.Address, &r.prov.address, od.Address, sourceMaps, "address")
-	r.set(&r.facts.Phone, &r.prov.phone, od.Phone, sourceMaps, "phone")
-	r.set(&r.facts.Website, &r.prov.website, od.Website, sourceMaps, "website")
-	r.set(&r.facts.Hours, &r.prov.hours, od.Hours, sourceMaps, "hours")
+	mapsConf := confidenceForMaps(od)
+	r.setWithConf(&r.facts.PlaceName, &r.prov.placeName, od.Name, sourceMaps, mapsConf, "place_name")
+	r.setWithConf(&r.facts.Address, &r.prov.address, od.Address, sourceMaps, mapsConf, "address")
+	r.setWithConf(&r.facts.Phone, &r.prov.phone, od.Phone, sourceMaps, mapsConf, "phone")
+	r.setWithConf(&r.facts.Website, &r.prov.website, od.Website, sourceMaps, mapsConf, "website")
+	r.setWithConf(&r.facts.Hours, &r.prov.hours, od.Hours, sourceMaps, mapsConf, "hours")
 	if od.Latitude != 0 && r.facts.Latitude == nil {
 		r.facts.Latitude = &od.Latitude
 		r.facts.Longitude = &od.Longitude
