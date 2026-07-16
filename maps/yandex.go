@@ -15,6 +15,13 @@ import (
 const (
 	defaultHTTPTimeout = 15 * time.Second
 	maxOrgResults      = 3
+
+	// Retry configuration for transient fetch failures (browser render timeout,
+	// HTTP 5xx, network blip). Does NOT retry on context cancellation — the
+	// caller's deadline is authoritative.
+	fetchMaxRetries   = 2
+	fetchBaseBackoff  = 500 * time.Millisecond
+	fetchMaxBackoff   = 3 * time.Second
 )
 
 // SearchResult is a single web search result (URL + Title).
@@ -202,12 +209,64 @@ func (y *YandexMaps) findOrgURLsViaSearXNG(ctx context.Context, query string) ([
 	return urls, nil
 }
 
+
+// isRetryableError reports whether an error from orgFetcher or fetchOrgStatus
+// is worth retrying. Context cancellation and deadlines are NOT retryable
+// (the caller's budget is exhausted). Network errors and HTTP 5xx are.
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	return true
+}
+
 // fetchAndParse fetches an org page and returns a CheckResult with status and optional OrgData.
+// Retries transient failures (network errors, browser timeouts) up to fetchMaxRetries
+// times with exponential backoff. Context cancellation is NOT retried.
 func (y *YandexMaps) fetchAndParse(ctx context.Context, orgURL string) (*CheckResult, error) {
+	var lastErr error
+
+	for attempt := 0; attempt <= fetchMaxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := fetchBaseBackoff * (1 << (attempt - 1))
+			if backoff > fetchMaxBackoff {
+				backoff = fetchMaxBackoff
+			}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff):
+			}
+		}
+
+		result, err := y.fetchAndParseOnce(ctx, orgURL)
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+		if !isRetryableError(err) {
+			return nil, err
+		}
+	}
+
+	return nil, fmt.Errorf("yandex: fetch after %d retries: %w", fetchMaxRetries, lastErr)
+}
+
+// fetchAndParseOnce performs a single fetch+parse attempt without retry.
+func (y *YandexMaps) fetchAndParseOnce(ctx context.Context, orgURL string) (*CheckResult, error) {
 	// Browser path: render SPA, extract full business data.
 	if y.orgFetcher != nil {
 		html, err := y.orgFetcher(ctx, orgURL)
-		if err == nil && html != "" {
+		if err != nil {
+			// Browser error — return it (retry layer handles backoff).
+			// Do NOT fall through to plain HTTP: the orgFetcher is the configured
+			// path and a fallthrough would double the request load on failure.
+			return nil, fmt.Errorf("yandex: org fetcher: %w", err)
+		}
+		if html != "" {
 			od := parseOrgPage([]byte(html))
 			od.MapURL = orgURL
 			result := &CheckResult{
@@ -220,7 +279,7 @@ func (y *YandexMaps) fetchAndParse(ctx context.Context, orgURL string) (*CheckRe
 			}
 			return result, nil
 		}
-		// Fall through to plain HTTP on browser failure.
+		// Empty html with no error — fall through to plain HTTP.
 	}
 
 	status, err := y.fetchOrgStatus(ctx, orgURL)
