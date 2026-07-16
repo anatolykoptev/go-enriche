@@ -80,10 +80,11 @@ func TestCollectSiteNumbers_Eksimer_SocialLinkTrustworthyDespiteCalltouch(t *tes
 }
 
 // TestCollectSiteNumbers_Lazermed_AnchoredTelTrustworthyNoDNI is the second P2
-// calibration golden: a CLEAN (no DNI vendor) site whose pickPhoneCandidate
-// winner is the WhatsApp number, but whose real contacts-region tel:
-// (571-46-12) — a valid, DIFFERENT site number pickPhoneCandidate discards —
-// must still surface as Trustworthy in the SET (no DNI vendor demotes it).
+// calibration golden: a CLEAN (no DNI vendor) site whose contacts-region tel:
+// (571-46-12) is the pickPhoneCandidate winner (issue #55: a labeled
+// contacts-region phone outranks a social-link number on a clean page), while
+// the WhatsApp number (9998877) — a valid, DIFFERENT site number — still
+// surfaces as Trustworthy in the SET (no DNI vendor demotes it).
 func TestCollectSiteNumbers_Lazermed_AnchoredTelTrustworthyNoDNI(t *testing.T) {
 	t.Parallel()
 	doc := docFromFixture(t, "lazermed.html")
@@ -106,13 +107,13 @@ func TestCollectSiteNumbers_Lazermed_AnchoredTelTrustworthyNoDNI(t *testing.T) {
 		t.Errorf("571-46-12 Trustworthy = false, want true (anchored, no DNI vendor active)")
 	}
 
-	// Calibration cross-check: pickPhoneCandidate/Facts.Phone still commits to
-	// the WhatsApp number (rule 1 — social-link wins unconditionally), NOT
-	// 571-46-12 — proving 571-46-12 is exactly the class of valid-but-
-	// different number the single-winner resolver discards.
+	// Calibration cross-check: pickPhoneCandidate/Facts.Phone now commits to
+	// the labeled contacts-region tel: (571-46-12), NOT the WhatsApp number
+	// — issue #55: on a clean page a labeled contacts-region phone outranks
+	// a social-link number (which may be a separate messaging contact).
 	facts := ExtractFactsForCity(readFixture(t, "lazermed.html"), "https://example.com", "")
-	if facts.Phone == nil || !strings.Contains(*facts.Phone, "9998877") {
-		t.Fatalf("Facts.Phone = %v, want the WhatsApp number (571-46-12 must NOT be the single-winner pick)", derefOrNilExtract(facts.Phone))
+	if facts.Phone == nil || !strings.Contains(*facts.Phone, "571-46-12") {
+		t.Fatalf("Facts.Phone = %v, want the labeled contacts-region tel: 571-46-12 (not the WhatsApp number — issue #55)", derefOrNilExtract(facts.Phone))
 	}
 }
 
