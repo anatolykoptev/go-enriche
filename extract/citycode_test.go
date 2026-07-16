@@ -297,16 +297,19 @@ func TestResolvePhoneForCity_TollFreeDemoted(t *testing.T) {
 	}
 }
 
-// The genuine guard for the social-link PRE-CHECK in resolvePhoneForCity: with
-// a known city AND a city-local (812) candidate present, the area-code
-// tiebreaker WOULD pick the local 812 — but the social-link pre-check runs
-// first and must win, because the (812) is a DNI rotating proxy and the social
-// link is the stable owned number. Removing the pre-check makes this fail
-// (the area-code rule returns the 812), unlike the no-city golden case where
-// the fallback tier loop selects the top tier regardless.
+// The genuine guard for the DNI branch in resolvePhoneForCityDNI: with a
+// known city AND a city-local (812) candidate present, the area-code
+// tiebreaker WOULD pick the local 812 — but on a DNI-active page the DNI
+// branch runs first and must pick the social-link number, because the (812)
+// is a DNI rotating proxy and the social link is the stable owned number.
+// The Roistat loader script MUST be present so detectDNIVendor triggers the
+// DNI branch. Without it the page is clean and the labeled contacts-region
+// tel: wins (issue #55).
 func TestResolvePhoneForCity_SocialLinkBeatsLocalAreaCode(t *testing.T) {
 	t.Parallel()
-	html := `<html><body>
+	html := `<html><head>
+	<script src="//cloud.roistat.com/api/site/1.0/abc/init"></script>
+	</head><body>
 	<header class="header">
 	  <a href="tel:+78129561840">+7 (812) 956-18-40</a>
 	  <a href="https://api.whatsapp.com/send?phone=79219561840">WhatsApp</a>
@@ -322,7 +325,7 @@ func TestResolvePhoneForCity_SocialLinkBeatsLocalAreaCode(t *testing.T) {
 		t.Fatal("want a resolved phone")
 	}
 	if phone != "+79219561840" {
-		t.Errorf("social-link pre-check must beat the local 812 area-code pick; want +79219561840, got %q", phone)
+		t.Errorf("DNI branch must pick the social-link number over the local 812 area-code pick; want +79219561840, got %q", phone)
 	}
 }
 
