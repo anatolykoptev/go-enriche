@@ -69,7 +69,7 @@ func TestValidatePrice(t *testing.T) {
 		{"zero", "0"},
 		{"range with symbol", "1500-2500 ₽"},
 		{"from price", "от 200 рублей"},
-		{"currency symbols", "₽₽"},
+		{"free with digits", "бесплатно (0 руб)"},
 	}
 
 	for _, tc := range valid {
@@ -93,6 +93,10 @@ func TestValidatePrice(t *testing.T) {
 		{"spaces", "   "},
 		{"url", "https://example.com/price"},
 		{"css class", ".price-block{display:none}"},
+		// Issue #56: a bare currency symbol with no digit is NOT a price.
+		{"currency symbol only", "₽₽"},
+		// Issue #56: digit-free marketing prose is NOT a price.
+		{"prose no digit", "уборки за минуту гарантированно"},
 	}
 
 	for _, tc := range invalid {
