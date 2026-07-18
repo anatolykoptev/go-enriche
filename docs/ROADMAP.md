@@ -163,7 +163,7 @@ Extracted from go-wp's monolithic `tool_enrich.go`. Three consumers: go-wp, go-n
 
 ## Content Automation Track (NEW, 2026-04-23)
 
-Cross-cutting from [~/docs/content-automation/ROADMAP.md](/home/krolik/docs/content-automation/ROADMAP.md).
+Cross-cutting from [~/docs/content-automation/ROADMAP.md](/home/user/docs/content-automation/ROADMAP.md).
 
 **Context**: web search сегодня дублируется трижды — go-search (MCP + direct DDG/Startpage scrapers), go-enriche (library with `search/` package, same DDG/Startpage/Brave/OxBrowser), and ox-browser `/images/search`. Bugfixes нужны 2-3 раза.
 
@@ -183,4 +183,4 @@ Rationale: go-enriche already has CircuitBreaker + RateLimit + Parallel + Fallba
 
 - [ ] go-search imports go-enriche as library, deletes own `internal/engine/direct_{ddg,startpage,brave}.go` (~800 LOC)
 - [ ] go-search keeps `youtube_transcript`, `hn_search`, `github_code_search`, `hf_*` — unique to that service
-- See [~/docs/content-automation/phases/phase-4-imagen-consolidation.md](/home/krolik/docs/content-automation/phases/phase-4-imagen-consolidation.md) task 4.3 for full details
+- See [~/docs/content-automation/phases/phase-4-imagen-consolidation.md](/home/user/docs/content-automation/phases/phase-4-imagen-consolidation.md) task 4.3 for full details
