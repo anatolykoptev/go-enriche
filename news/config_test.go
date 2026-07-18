@@ -12,7 +12,7 @@ func TestLoadConfig(t *testing.T) {
 
 	cfg := Config{
 		Projects: map[string]*Project{
-			"piter": {
+			"host-b": {
 				Queries: []Query{
 					{Q: "Петербург новости", Topic: "general"},
 				},
@@ -46,7 +46,7 @@ func TestLoadConfig(t *testing.T) {
 		t.Fatalf("Projects count = %d, want 1", len(got.Projects))
 	}
 
-	proj, ok := got.Projects["piter"]
+	proj, ok := got.Projects["host-b"]
 	if !ok {
 		t.Fatal("Projects[\"piter\"] not found")
 	}

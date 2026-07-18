@@ -15,7 +15,7 @@ import (
 // this is SKIPPED entirely, not truncated: truncating mid-JSON would only
 // guarantee a parse failure, so skipping the whole script is the honest
 // fail-closed move against an oversized/adversarial payload on the shared
-// 4-core krolik box.
+// 4-core host-a box.
 const maxBranchScriptBytes = 256 * 1024
 
 // maxBranchCandidates bounds how many phone candidates branchJSONCandidates

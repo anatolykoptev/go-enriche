@@ -13,7 +13,7 @@ import (
 
 // These tests prove NewStealthClient's WIRING onto go-kit/httputil's
 // SSRFGuards() -- the fleet SSRF fix step 3a/4 (see
-// ~/deploy/server-config/plans/multi-stealth-ssrf/2026-07-08-stealth-redirect-swallow-ssrf.md,
+// internal SSRF remediation plan,
 // blast-radius row 7: this is the DIRECT, no-proxy stealth client, the
 // highest-risk row -- any caller that omits StealthWithProxy dials the
 // target straight from this container).
