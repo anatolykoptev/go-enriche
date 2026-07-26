@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	stealth "github.com/anatolykoptev/go-stealth"
 )
 
 const (
@@ -304,8 +306,7 @@ func (y *YandexMaps) fetchOrgStatus(ctx context.Context, orgURL string) (string,
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "+
-		"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", stealth.UserAgentForProfile(stealth.ProfileChrome131))
 	req.Header.Set("Accept-Language", "ru-RU,ru;q=0.9")
 
 	resp, err := y.httpClient.Do(req) //nolint:gosec // org URLs from search, not user input
