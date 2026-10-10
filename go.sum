@@ -12,8 +12,8 @@ github.com/anatolykoptev/go-engine v1.42.0 h1:pRDCbdHWkUzZ3H3sFmwSrDta74r6XQmYRZ
 github.com/anatolykoptev/go-engine v1.42.0/go.mod h1:U+TjTZ9jnA2YZLbwBHHDwHyK6EAyW7n1jBE5XsWpYVg=
 github.com/anatolykoptev/go-imagefy v0.1.1 h1:003FpJy8SXeTJNCfnvYuA+QOacP8bsxn2h5gTKquJE0=
 github.com/anatolykoptev/go-imagefy v0.1.1/go.mod h1:s+V/fuhF+bpbsGXLeYdWEtQR/rijhSqeFxXAQHWIo+M=
-github.com/anatolykoptev/go-kit v0.96.0 h1:EZ7oFATwF1s0uomKOJ/sC2PuPjrMg0NDGWHdsuGU/UA=
-github.com/anatolykoptev/go-kit v0.96.0/go.mod h1:yBqZ8R/zWK4DQfcmmeBGO1LiWM6GRLxTiJGxtlTTFz4=
+github.com/anatolykoptev/go-kit v0.97.18 h1:ohhljqPLNhdz0CZHss+hLHS0j8A5cWZqQLLRrrHUOP8=
+github.com/anatolykoptev/go-kit v0.97.18/go.mod h1:YzADfXVpzihE6j+v4WuiQYU4EuCPI8sXxrZdhexTaH0=
 github.com/anatolykoptev/go-stealth v1.21.0 h1:WqLo6SgTSauoss+eJvJlSVjsNxwKP0RtNruFjfPqDDE=
 github.com/anatolykoptev/go-stealth v1.21.0/go.mod h1:1Fevj8WfJDJ9h/t4Bl8MtHbuQ92ZPjIm8SR6/vnwJsQ=
 github.com/andybalholm/brotli v1.2.0 h1:ukwgCxwYrmACq68yiUqwIWnGY0cTPox/M94sVwToPjQ=

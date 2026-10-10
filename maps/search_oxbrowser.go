@@ -3,7 +3,6 @@ package maps
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -15,9 +14,11 @@ const oxSearchTimeout = 20 * time.Second
 
 // OxBrowserSearch returns a SearchFunc that uses ox-browser's /fetch endpoint
 // to query DuckDuckGo HTML and parse results. This replaces SearXNG dependency.
+// Requests carry X-Internal-Secret from INTERNAL_SERVICE_SECRET when set
+// (scoped to the ox-browser origin by go-kit svcauth).
 func OxBrowserSearch(oxBrowserURL string) SearchFunc {
 	baseURL := strings.TrimRight(oxBrowserURL, "/")
-	client := &http.Client{Timeout: oxSearchTimeout}
+	client := oxHTTPClient(oxSearchTimeout, baseURL)
 
 	return func(ctx context.Context, query string) ([]SearchResult, error) {
 		ddgURL := "https://html.duckduckgo.com/html/?q=" + url.QueryEscape(query)

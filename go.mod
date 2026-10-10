@@ -1,6 +1,6 @@
 module github.com/anatolykoptev/go-enriche
 
-go 1.26
+go 1.26.3
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.0
@@ -8,7 +8,7 @@ require (
 	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/anatolykoptev/go-engine v1.42.0
 	github.com/anatolykoptev/go-imagefy v0.1.1
-	github.com/anatolykoptev/go-kit v0.96.0
+	github.com/anatolykoptev/go-kit v0.97.18
 	github.com/anatolykoptev/go-stealth v1.21.0
 	github.com/astappiev/microdata v1.0.2
 	github.com/markusmobius/go-trafilatura v1.12.2

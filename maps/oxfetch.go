@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
+
+	"github.com/anatolykoptev/go-kit/svcauth"
 )
 
 // maxResponseBytes is the size limit for HTTP response bodies (4 MB).
@@ -19,6 +22,19 @@ type oxFetchResponse struct {
 	Body   string `json:"body"`
 	Status int    `json:"status"`
 	Error  string `json:"error,omitempty"`
+}
+
+// oxHTTPClient builds the HTTP client used for ox-browser calls: the given
+// timeout over the default transport, wrapped by go-kit svcauth so requests to
+// baseURL carry X-Internal-Secret from INTERNAL_SERVICE_SECRET when that env
+// var is set. A baseURL svcauth cannot parse leaves the default transport —
+// same behaviour as before, the URL fails at request time as it does today.
+func oxHTTPClient(timeout time.Duration, baseURL string) *http.Client {
+	c := &http.Client{Timeout: timeout}
+	if t, err := svcauth.FromEnv(c.Transport, baseURL); err == nil {
+		c.Transport = t
+	}
+	return c
 }
 
 // oxFetch sends a URL to ox-browser /fetch and returns the response body.
