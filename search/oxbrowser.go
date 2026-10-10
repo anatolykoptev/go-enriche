@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anatolykoptev/go-engine/websearch"
+	"github.com/anatolykoptev/go-kit/svcauth"
 )
 
 const oxBrowserSearchTimeout = 30 * time.Second
@@ -34,10 +35,18 @@ func WithOxBrowserMaxResults(n int) OxBrowserOption {
 
 // NewOxBrowser creates an ox-browser search provider.
 // baseURL is the ox-browser service URL (e.g. "http://ox-browser:8901").
+// Requests to baseURL carry X-Internal-Secret from INTERNAL_SERVICE_SECRET
+// when that env var is set; the header is scoped to that origin by go-kit
+// svcauth (never sent to redirect targets elsewhere).
 func NewOxBrowser(baseURL string, opts ...OxBrowserOption) *OxBrowser {
+	base := strings.TrimRight(baseURL, "/")
+	client := &http.Client{Timeout: oxBrowserSearchTimeout}
+	if t, err := svcauth.FromEnv(client.Transport, base); err == nil {
+		client.Transport = t
+	}
 	o := &OxBrowser{
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		client:     &http.Client{Timeout: oxBrowserSearchTimeout},
+		baseURL:    base,
+		client:     client,
 		maxResults: defaultMaxResults,
 	}
 	for _, opt := range opts {

@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/anatolykoptev/go-kit/svcauth"
 )
 
 const (
@@ -23,10 +25,18 @@ type OxBrowserClient struct {
 }
 
 // NewOxBrowserClient creates a client for the ox-browser read API.
+// Requests to baseURL carry X-Internal-Secret from INTERNAL_SERVICE_SECRET
+// when that env var is set; the header is scoped to that origin by go-kit
+// svcauth (never sent to redirect targets elsewhere).
 func NewOxBrowserClient(baseURL string) *OxBrowserClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	client := &http.Client{Timeout: oxBrowserTimeout}
+	if t, err := svcauth.FromEnv(client.Transport, baseURL); err == nil {
+		client.Transport = t
+	}
 	return &OxBrowserClient{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		client:  &http.Client{Timeout: oxBrowserTimeout},
+		baseURL: baseURL,
+		client:  client,
 	}
 }
 

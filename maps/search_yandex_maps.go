@@ -3,7 +3,6 @@ package maps
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
@@ -18,9 +17,11 @@ var yandexMapsOrgRe = regexp.MustCompile(`yandex\.ru/maps/org/[^"<>,\s\\]+`)
 // YandexMapsSearch returns a SearchFunc that queries Yandex Maps search
 // page directly via ox-browser /fetch. No API key needed.
 // Note: Yandex Maps is SPA — this only works when org URLs leak into SSR HTML.
+// Requests carry X-Internal-Secret from INTERNAL_SERVICE_SECRET when set
+// (scoped to the ox-browser origin by go-kit svcauth).
 func YandexMapsSearch(oxBrowserURL string) SearchFunc {
 	baseURL := strings.TrimRight(oxBrowserURL, "/")
-	client := &http.Client{Timeout: ymSearchTimeout}
+	client := oxHTTPClient(ymSearchTimeout, baseURL)
 
 	return func(ctx context.Context, query string) ([]SearchResult, error) {
 		searchQuery := cleanMapsQuery(query)
