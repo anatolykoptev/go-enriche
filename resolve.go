@@ -476,7 +476,7 @@ func (r *resolver) snapshot() Provenance {
 // is tagged with extract.ClassifyCityMembership before merging, so
 // CityMatch/CityForeign travel with the SAME candidate whichever occurrence
 // DedupeKeepStronger keeps; an empty city (unknown/unset project city, e.g.
-// hully) yields extract.ExpectedAreaCodes("")==nil, which
+// a non-RU project) yields extract.ExpectedAreaCodes("")==nil, which
 // ClassifyCityMembership tags neutral (false, false) — byte-identical to
 // pre-city-membership behavior.
 func (r *resolver) addSiteNumbers(nums []extract.PhoneNumberFact, city string) {

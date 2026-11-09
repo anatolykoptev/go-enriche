@@ -88,7 +88,7 @@ func TestEnrich_SiteNumbers_CityMembership_NationalChain(t *testing.T) {
 }
 
 // TestEnrich_SiteNumbers_CityMembership_EmptyCity_Neutral proves the
-// byte-identical no-op: when Item.City is unset (hully / non-RU / any
+// byte-identical no-op: when Item.City is unset (non-RU / any
 // project with no configured city), EVERY SiteNumbers candidate — including
 // the geographic-landline branches — must tag neutral (CityMatch=false,
 // CityForeign=false), matching pre-city-membership behavior exactly.

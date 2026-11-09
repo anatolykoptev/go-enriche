@@ -18,7 +18,7 @@ Current go-wp implementation (`tool_enrich_extract.go`) is a regex-based prototy
 - **Status**: Actively maintained (2025)
 - **Language**: Go
 
-Go port of Python Trafilatura — leading by benchmarks (ScrapingHub, Bevendorff 2023). Multi-stage pipeline:
+Go port of Python Trafilatura — leading by benchmarks (Zyte, Bevendorff 2023). Multi-stage pipeline:
 1. `docCleaning` — remove comments, scripts, styles
 2. `pruneHTML` — CSS selector pruning (nav/footer/ads/sidebars)
 3. `deleteByLinkDensity` — remove link-heavy blocks
