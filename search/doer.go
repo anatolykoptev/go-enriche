@@ -20,7 +20,7 @@ type ProxyPoolProvider interface {
 	Next() string
 }
 
-// ChromeHeaders returns browser-like HTTP headers for direct scraping.
+// ChromeHeaders returns browser-like HTTP headers for direct fetching.
 func ChromeHeaders() map[string]string {
 	return stealth.ChromeHeaders()
 }

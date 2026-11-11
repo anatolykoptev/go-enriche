@@ -134,7 +134,7 @@ func isRUGeographicLandline(phone string) bool {
 // or any number when cityCodes is empty (the project's city is unknown/
 // unset) classifies as NEITHER — cityMatch=false AND cityForeign=false
 // ("neutral"). The empty-cityCodes case is deliberate: a project with no
-// configured city (e.g. hully, non-RU) must tag every candidate neutral, so
+// configured city (e.g. a non-RU project) must tag every candidate neutral, so
 // its SiteNumbers output stays byte-identical to the pre-city-membership
 // behavior.
 func ClassifyCityMembership(phone string, cityCodes []int) (cityMatch, cityForeign bool) {

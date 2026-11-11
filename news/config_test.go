@@ -48,7 +48,7 @@ func TestLoadConfig(t *testing.T) {
 
 	proj, ok := got.Projects["host-b"]
 	if !ok {
-		t.Fatal("Projects[\"piter\"] not found")
+		t.Fatal("Projects[\"host-b\"] not found")
 	}
 	if len(proj.Queries) != 1 {
 		t.Errorf("Queries count = %d, want 1", len(proj.Queries))

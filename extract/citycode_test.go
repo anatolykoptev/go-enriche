@@ -161,7 +161,7 @@ func TestClassifyCityMembership_MobileAndTollFree_Neutral(t *testing.T) {
 }
 
 // TestClassifyCityMembership_EmptyCityCodes_Neutral: when the project has no
-// configured city (cityCodes empty — hully / non-RU / unset), EVERY
+// configured city (cityCodes empty — non-RU / unset), EVERY
 // candidate — including a real geographic landline — must classify neutral
 // (false, false), so SiteNumbers output stays byte-identical to
 // pre-city-membership behavior for any project that never sets Item.City.
