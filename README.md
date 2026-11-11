@@ -85,4 +85,4 @@ document is listed in [docs/INDEX.md](docs/INDEX.md).
 
 ## License
 
-MIT, see [LICENSE.md](LICENSE.md).
+Apache-2.0, see [LICENSE.md](LICENSE.md).

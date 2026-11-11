@@ -6,6 +6,10 @@ versioning. Entries before v1.40 are summarised from the commit history.
 
 ## [Unreleased]
 
+### Changed
+
+- Licence changed from MIT to Apache-2.0 from this version on.
+
 ### Added
 - Send the internal service secret to the ox-browser service through go-kit svcauth.
 
