@@ -1,47 +1,88 @@
 # go-enriche
 
-Standalone Go library for web content enrichment: fetch pages, extract article text, parse structured data (JSON-LD/Microdata), search for context.
+Go library that enriches an item (a place, news story or event) from the web: it fetches the
+official page, extracts article text and contact facts, parses schema.org data, checks the place
+on map services and adds search context. It degrades gracefully, returning a partial result when
+a step fails. Built for services that publish content and need verified facts.
 
-## Status
+## Install
 
-Phase 1 complete — extract/ and structured/ packages ready.
+```sh
+go get github.com/anatolykoptev/go-enriche
+```
+
+Go 1.26 or newer (see `go.mod`).
 
 ## Packages
 
 | Package | Purpose |
 |---------|---------|
-| `extract/` | Article text (trafilatura), facts (structured→regex cascade), og:image, dates |
-| `structured/` | Typed schema.org parsing: Place, Article, Event, Organization |
-| `fetch/` | HTTP fetch with status detection, stealth, singleflight (Phase 2) |
-| `search/` | Web search context (DDG, Startpage, Brave, Google providers) |
-| `cache/` | Cache interface + Memory/Redis/Tiered (Phase 3) |
+| `enriche` (root) | `Enricher`: `Enrich`, `EnrichBatch`, `Search`; fact resolver, provenance, metrics hooks |
+| `extract/` | Article text (trafilatura), facts (structured, then regex cascade), contacts and phone roles, og:image, dates |
+| `structured/` | Typed schema.org parsing from JSON-LD and Microdata: Place, Article, Event, Organization |
+| `fetch/` | HTTP fetch with status detection, redirect handling, singleflight, SSRF guard, ox-browser client |
+| `search/` | Search providers (DDG, Startpage, Brave, Google, ox-browser) and decorators: fallback, parallel, rate limit, circuit breaker |
+| `maps/` | Place status and geocoding checkers: 2GIS, Yandex Maps, DaData, with composite, rate-limit and resilience wrappers |
+| `cache/` | `Cache` interface with Memory, Redis and Tiered implementations |
+| `news/` | News scoring, config and file-based store |
 
 ## Usage
 
 ```go
 import (
-    "github.com/anatolykoptev/go-enriche/extract"
-    "github.com/anatolykoptev/go-enriche/structured"
+    "context"
+    "fmt"
+    "log"
+
+    "github.com/anatolykoptev/go-enriche"
+    "github.com/anatolykoptev/go-enriche/cache"
+    "github.com/anatolykoptev/go-enriche/search"
 )
 
-// Extract article text
-result, _ := extract.ExtractText(reader, pageURL)
-fmt.Println(result.Content, result.Title)
-
-// Extract structured facts (JSON-LD → Microdata → regex cascade)
-facts := extract.ExtractFacts(html, pageURL)
-fmt.Println(facts.PlaceName, facts.Phone)
-
-// Parse schema.org directly
-data, _ := structured.Parse(reader, "text/html", pageURL)
-if place := data.FirstPlace(); place != nil {
-    fmt.Println(place.Name, place.Address)
+ddg, err := search.NewDDG("") // proxy URL; empty means direct
+if err != nil {
+    log.Fatal(err)
 }
+e := enriche.New(
+    enriche.WithCache(cache.NewMemory()),
+    enriche.WithSearch(ddg),
+)
 
-// Extract og:image
-img := extract.ExtractOGImage(html)
+res, err := e.Enrich(context.Background(), enriche.Item{
+    Name: "Example Cafe",
+    URL:  "https://example.com/",
+    City: "Springfield",
+    Mode: enriche.ModePlaces,
+})
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println(res.Status, res.Content, res.Facts.Phone)
 ```
+
+The `extract` and `structured` packages also work on their own on an HTML reader or string.
+
+## Configuration
+
+Everything is configured in code through functional options (`WithFetcher`, `WithCache`,
+`WithCacheTTL`, `WithSearch`, `WithMapsChecker`, `WithConcurrency`, `WithMaxContentLen`,
+`WithFormat`, `WithLogger`, `WithMetrics`, `WithBrowserFetch`, `WithOxBrowser`, `WithTargetGuard`,
+`WithRenderSkipDisabled`, ...). The library reads no environment variables. By default an
+`Enricher` fetches with a fresh `fetch.Fetcher`, caches nothing, runs five items concurrently, caches
+results for 24 hours when a cache is set, and checks every outbound target with the go-kit SSRF
+guard.
+
+## Status
+
+Released as semver tags (`v1.x`); there is no release automation, tags are cut by hand and
+[CHANGELOG.md](CHANGELOG.md) is kept manually. `docs/ROADMAP.md` records the original phases and
+`docs/ARCHITECTURE.md` the original design; the code is authoritative where they differ.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md); coding agents start at [CLAUDE.md](CLAUDE.md). Every
+document is listed in [docs/INDEX.md](docs/INDEX.md).
 
 ## License
 
-MIT
+MIT, see [LICENSE.md](LICENSE.md).
