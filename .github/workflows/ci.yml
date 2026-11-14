@@ -113,4 +113,4 @@ jobs:
           go-version: "1.25"
       - uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.12.2
+          version: v2.15.0
